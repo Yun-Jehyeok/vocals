@@ -31,7 +31,7 @@
 
 ### 3.1 앱: Expo (React Native)
 
-- **Expo**: React Native 위에서 빌드, 푸시, 카메라, 업데이트 같은 기능을 묶어 주는 도구다. 현재 Expo SDK 55는 React Native 0.83을 쓰고, React Native는 0.82부터 New Architecture만으로 돌아간다. 예전처럼 "성능 때문에 네이티브가 낫다"는 차이는 거의 없다.
+- **Expo**: React Native 위에서 빌드, 푸시, 카메라, 업데이트 같은 기능을 묶어 주는 도구다. npm 기준 최신은 Expo SDK 58(React Native 0.88)이고, React Native는 0.82부터 New Architecture만으로 돌아간다. 예전처럼 "성능 때문에 네이티브가 낫다"는 차이는 거의 없다.
 - **Flutter**: 성능과 완성도는 비슷하지만 Dart를 새로 배워야 하고, 운영자 웹(React)과 코드를 나눠 쓸 수 없다.
 - **추천: Expo**
   - React·TypeScript로 앱과 운영자 웹을 같이 만들 수 있고, 타입과 도메인 로직을 공용 패키지로 나눠 쓸 수 있다.
