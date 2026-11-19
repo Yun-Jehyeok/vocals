@@ -74,7 +74,7 @@ erDiagram
         enum approval_status "pending, approved, rejected, suspended"
         bool is_pilot
         bool listed "트레이너 찾기 노출"
-        string payout_seller_id "PG 지급대행 셀러 ID, 결정 1"
+        string payout_seller_id "PG 지급대행 셀러 ID"
         string payout_account_masked "은행·끝 4자리"
         timestamp approved_at
     }
@@ -104,6 +104,7 @@ erDiagram
 - 탈퇴하면 `status = withdrawn`, `purge_after = 탈퇴일 + 약 6개월`로 두고, 그날이 지나면 계정 정보와 영상을 지운다. 결제·정산 기록은 법정 기간 동안 남긴다. (AUTH-08)
 - 승인 전(`pending`)에는 `link_slug`로 프로필을 열 수 없다. 목록에는 `approved`이면서 `listed = true`인 트레이너만 나온다. (AUTH-05, MKT-01, MKT-07)
 - 프로필 영상은 3개까지다. (TRN-07)
+- 정산 계좌번호 전체는 저장하지 않는다. 트레이너가 계좌를 입력하면 서버가 PG 지급대행에 셀러로 등록하고, PG가 준 셀러 ID(`payout_seller_id`)와 "은행명·끝 4자리"(`payout_account_masked`)만 저장한다. 매달 지급할 때는 셀러 ID와 금액만 PG에 보낸다. 계좌를 바꾸면 PG에 다시 등록한다. PG별 등록 절차는 계약할 때 확인한다.
 
 ## 3. 상품·결제·수강권
 
@@ -474,4 +475,4 @@ erDiagram
 
 ## 10. 결정 필요
 
-1. ★ **트레이너 정산 계좌 저장 방식** — 제안: 계좌번호 전체를 우리 DB에 두지 않는다. 트레이너가 앱에 계좌를 입력하면 서버가 PG 지급대행에 셀러로 등록하고, 우리 DB에는 PG가 준 셀러 ID와 "은행명·끝 4자리"만 둔다. 매달 지급할 때는 셀러 ID와 금액만 PG에 보낸다.
+지금은 없다. PRD와 `docs/idea.md`의 결정 필요 항목이 정해지면 이 문서에 반영한다.
