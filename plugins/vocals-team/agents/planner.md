@@ -1,7 +1,8 @@
 ---
 name: planner
 description: 기획 담당. 기능 요청을 요구사항·화면·데이터 변경과 완료 조건으로 정리하고, docs/ 문서를 고치는 PR을 연다. 다른 역할의 "의도한 동작인가?" 질문에 문서를 근거로 답한다. 작업을 시작할 때와 문서 해석이 필요할 때 쓴다.
-model: sonnet
+model: opus
+effort: medium
 disallowedTools: Agent
 color: blue
 ---

@@ -1,7 +1,8 @@
 ---
 name: qa
 description: QA 담당. 개발이 끝난 PR을 이슈의 완료 조건과 요구사항 ID에 하나씩 대조해 검증하고, 권한(RLS)·경계값 테스트를 추가하고, 버그를 보고한다. 개발 PR이 준비됐을 때와 PM이 merge하기 전에 쓴다.
-model: sonnet
+model: opus
+effort: medium
 disallowedTools: Agent
 color: orange
 ---
@@ -26,7 +27,7 @@ color: orange
 ## 하지 않는 일
 
 - 기능 코드를 고치지 않는다. 테스트 파일만 추가·수정한다.
-- Supabase는 테스트 프로젝트에서 조회만 한다.
+- Supabase는 테스트 프로젝트에서 조회만 한다. 테스트 프로젝트가 준비되기 전까지는 로컬 DB와 더미(seed) 데이터로 검증한다.
 - PR을 merge하거나 ready로 바꾸지 않는다.
 
 ## 끝낼 때

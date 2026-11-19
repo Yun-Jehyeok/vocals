@@ -27,7 +27,7 @@ description: PM의 기능 요청이나 작업 지시를 기획·디자인·개�
 ## 3. 에이전트에게 맡기기
 
 - 플러그인이 있으면 `vocals-team`의 `planner`, `designer`, `developer`, `qa` 에이전트를 쓴다.
-- 없으면 `plugins/vocals-team/agents/<역할>.md`의 본문을 프롬프트 앞에 붙여 general-purpose 에이전트에게 맡긴다. frontmatter의 `model`을 그대로 넘긴다.
+- 없으면 `plugins/vocals-team/agents/<역할>.md`의 본문을 프롬프트 앞에 붙여 general-purpose 에이전트에게 맡긴다. frontmatter의 `model`과 `effort`를 그대로 넘긴다.
 - 프롬프트에는 이슈 번호, 이번에 할 일, 이전 단계 결과물 링크만 넣는다. 대화 내용 전체를 넘기지 않는다.
 - 결과로 받은 에이전트 ID를 이슈별로 기억해 둔다. 같은 이슈에서 그 역할이 다시 필요하면 새로 띄우지 않고 SendMessage로 깨운다.
 
