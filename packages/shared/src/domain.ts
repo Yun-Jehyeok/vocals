@@ -6,6 +6,19 @@
 export const USER_ROLES = ["student", "trainer", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
+export const USER_STATUSES = ["active", "withdrawn"] as const;
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+/**
+ * 로그인 수단. Supabase Auth의 provider 이름과 같다.
+ * 로그인 수단은 Supabase Auth(auth.identities)가 저장하므로 DB enum은 없다.
+ */
+export const AUTH_PROVIDERS = ["kakao", "google", "apple"] as const;
+export type AuthProvider = (typeof AUTH_PROVIDERS)[number];
+
+export const TRAINER_APPROVAL_STATUSES = ["pending", "approved", "rejected", "suspended"] as const;
+export type TrainerApprovalStatus = (typeof TRAINER_APPROVAL_STATUSES)[number];
+
 export const LESSON_TYPES = ["private", "group"] as const;
 export type LessonType = (typeof LESSON_TYPES)[number];
 

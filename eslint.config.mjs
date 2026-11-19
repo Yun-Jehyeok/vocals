@@ -4,7 +4,14 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/node_modules/**", "**/dist/**", "**/.expo/**", "**/.next/**", "**/coverage/**"],
+    ignores: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.expo/**",
+      "**/.next/**",
+      "**/coverage/**",
+      "supabase/.pglite/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
