@@ -335,7 +335,6 @@ erDiagram
     trainer_profiles ||--o{ settlements : "월별"
     settlements ||--o{ settlement_items : ""
     session_attendees ||--o| settlement_items : "차감된 회차"
-    fee_policies ||--o{ tickets : "결제 당시 적용"
 
     fee_policies {
         int id PK
@@ -365,7 +364,7 @@ erDiagram
 ```
 
 - 차감된 출결(`deducted = true`) 한 줄이 정산 항목 한 줄이 된다. 그 달에 차감된 항목을 모아 다음 달에 지급한다. (STL-02, STL-04)
-- 수수료율은 유입 경로별로 `fee_policies`에 두고, 결제할 때 수강권에 복사한다. 마켓플레이스 수수료율은 아직 정하지 않았다(`docs/idea.md` 결정 필요 4). (STL-03)
+- 수수료율은 유입 경로별로 `fee_policies`에 두고, 결제할 때 그 값을 수강권의 `tickets.fee_rate`에 복사한다. `tickets`는 `fee_policies`를 FK로 가리키지 않는다(3장 "결제 당시의 수수료율을 복사해 둔다"). 마켓플레이스 수수료율은 아직 정하지 않았다(`docs/idea.md` 결정 필요 4). (STL-03)
 - 파일럿 무료 수강권(`price_paid = 0`)은 정산 항목을 만들지 않는다. (STL-06)
 - 개인 트레이너(`business_type = individual`)에게 지급할 때는 3.3%를 원천징수해 `withholding_tax`에 기록하고 그만큼 빼고 지급한다. (STL-07)
 - 정산이 `confirmed`가 되면 그 달의 출결은 더 고칠 수 없다. (ATT-06)
@@ -483,4 +482,8 @@ erDiagram
 
 ## 10. 결정 필요
 
-지금은 없다. PRD와 `docs/idea.md`의 결정 필요 항목이 정해지면 이 문서에 반영한다.
+이 문서에서 새로 생긴 항목은 없다. 데이터 모델에 영향을 주는(★) 남은 항목은 다른 문서에서 다루고, 정해지면 이 문서에 반영한다.
+
+- `docs/prd.md` 결정 필요 3 — 트레이너 정지 시 기존 학생·수강권 처리 (`trainer_profiles.approval_status = suspended`의 효과, 2·3장)
+- `docs/idea.md` 결정 필요 2 — 환불 세부 규칙 (`refunds.amount` 계산, 3장)
+- `docs/idea.md` 결정 필요 4 — 마켓플레이스 유입 학생의 수수료율 (`fee_policies`의 `marketplace` 값, 6장)
