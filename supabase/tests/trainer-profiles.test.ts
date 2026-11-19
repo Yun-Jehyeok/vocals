@@ -1,13 +1,7 @@
 import type { PGlite, Transaction } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { anon, asUser, createTestDb, queryAs, withActor } from "./helpers/db.ts";
-import {
-  ALL_TRAINER_IDS,
-  APPROVED_TRAINER_IDS,
-  NEW_USER_ID,
-  SEED,
-  TRAINER_PRIVATE_COLUMNS,
-} from "./helpers/seed-ids.ts";
+import { ALL_TRAINER_IDS, APPROVED_TRAINER_IDS, NEW_USER_ID, SEED } from "./helpers/seed-ids.ts";
 
 let db: PGlite;
 
@@ -66,7 +60,7 @@ describe("trainer_profiles 읽기", () => {
   it.each([
     ["pending", SEED.trainerPending],
     ["rejected", SEED.trainerRejected],
-    ["suspended (결정 필요 2 추천안)", SEED.trainerSuspended],
+    ["suspended (확정 2)", SEED.trainerSuspended],
   ])("%s 프로필은 본인과 운영자만 읽는다 — AUTH-05, T-02", async (_, trainerId) => {
     expect(await visibleProfileIds(anon)).not.toContain(trainerId);
     expect(await visibleProfileIds(student)).not.toContain(trainerId);
@@ -79,23 +73,10 @@ describe("trainer_profiles 읽기", () => {
     expect(await visibleProfileIds(admin)).toEqual([...ALL_TRAINER_IDS].sort());
   });
 
-  describe.each([
-    ["anon", anon],
-    ["학생", student],
-    ["다른 트레이너", asUser(SEED.trainerPilot)],
-  ])("%s", (_, actor) => {
-    it.each(TRAINER_PRIVATE_COLUMNS)("%s를 읽을 수 없다 — S-01, T-23, A-05", async (column) => {
-      await expect(
-        queryAs(db, actor, `select ${column} from public.trainer_profiles where user_id = $1`, [
-          SEED.trainerApproved,
-        ]),
-      ).rejects.toThrow(/permission denied/);
-    });
+  it("anon도 select *로 읽는다 (숨길 컬럼이 없다)", async () => {
+    const { rows } = await queryAs(db, anon, `select * from public.trainer_profiles`);
+    expect(rows).toHaveLength(APPROVED_TRAINER_IDS.length);
   });
-
-  // 기획 질문 대기: users 개인정보와 같은 방식으로 정한다.
-  it.todo("트레이너 본인은 자기 사업자 유형·번호·정산 계좌(마스킹)를 읽는다 — T-23");
-  it.todo("운영자는 사업자 유형·번호·정산 정보를 읽는다 — A-01, A-05, ADM-07");
 });
 
 describe("trainer_profiles 만들기", () => {
@@ -110,8 +91,8 @@ describe("trainer_profiles 만들기", () => {
           listed: boolean;
           link_slug: string;
         }>(
-          `insert into public.trainer_profiles (user_id, display_name, business_type)
-           values ($1, '새 트레이너', 'individual')
+          `insert into public.trainer_profiles (user_id, display_name)
+           values ($1, '새 트레이너')
            returning approval_status, is_pilot, listed, link_slug`,
           [NEW_USER_ID],
         ),
@@ -125,7 +106,6 @@ describe("trainer_profiles 만들기", () => {
     ["approval_status", "'approved'"],
     ["is_pilot", "true"],
     ["link_slug", "'my-slug'"],
-    ["payout_seller_id", "'x'"],
     ["approved_at", "now()"],
   ])("트레이너는 프로필을 만들 때 %s를 넣을 수 없다", async (column, value) => {
     await expect(
@@ -134,8 +114,7 @@ describe("trainer_profiles 만들기", () => {
         asUser(NEW_USER_ID),
         (tx) =>
           tx.query(
-            `insert into public.trainer_profiles (user_id, business_type, ${column})
-             values ($1, 'individual', ${value})`,
+            `insert into public.trainer_profiles (user_id, ${column}) values ($1, ${value})`,
             [NEW_USER_ID],
           ),
         { setup: createTrainerUser },
@@ -149,10 +128,7 @@ describe("trainer_profiles 만들기", () => {
         db,
         asUser(SEED.trainerApproved),
         (tx) =>
-          tx.query(
-            `insert into public.trainer_profiles (user_id, business_type) values ($1, 'individual')`,
-            [NEW_USER_ID],
-          ),
+          tx.query(`insert into public.trainer_profiles (user_id) values ($1)`, [NEW_USER_ID]),
         { setup: createTrainerUser },
       ),
     ).rejects.toThrow(/row-level security/);
@@ -160,24 +136,18 @@ describe("trainer_profiles 만들기", () => {
 
   it("학생은 trainer_profiles 행을 만들 수 없다 — AUTH-02", async () => {
     await expect(
-      queryAs(
-        db,
-        student,
-        `insert into public.trainer_profiles (user_id, business_type) values ($1, 'individual')`,
-        [SEED.student1],
-      ),
+      queryAs(db, student, `insert into public.trainer_profiles (user_id) values ($1)`, [
+        SEED.student1,
+      ]),
       // 트리거(role 확인)가 RLS 정책보다 먼저 막는다. 어느 쪽이든 거부되면 된다.
     ).rejects.toThrow(/role = trainer|row-level security/);
   });
 
   it("anon은 trainer_profiles 행을 만들 수 없다", async () => {
     await expect(
-      queryAs(
-        db,
-        anon,
-        `insert into public.trainer_profiles (user_id, business_type) values ($1, 'individual')`,
-        [SEED.student1],
-      ),
+      queryAs(db, anon, `insert into public.trainer_profiles (user_id) values ($1)`, [
+        SEED.student1,
+      ]),
     ).rejects.toThrow(/permission denied/);
   });
 });
@@ -229,44 +199,20 @@ describe("trainer_profiles 고치기: 트레이너", () => {
 
   it.each([
     ["approved_at", "now()"],
-    ["payout_seller_id", "'x'"],
-    ["payout_account_masked", "'x'"],
     ["link_slug", "'my-slug'"],
-  ])("트레이너는 자기 것이라도 %s를 고칠 수 없다 — erd 2장, 결정 필요 5", async (column, value) => {
-    await expect(
-      queryAs(
-        db,
-        pending,
-        `update public.trainer_profiles set ${column} = ${value} where user_id = $1`,
-        [SEED.trainerPending],
-      ),
-    ).rejects.toThrow(/permission denied/);
-  });
-
-  it("pending 트레이너는 사업자 유형·번호를 고친다 — 결정 필요 4 추천안", async () => {
-    const result = await queryAs(
-      db,
-      pending,
-      `update public.trainer_profiles
-       set business_type = 'sole_proprietor', business_registration_no = '000-00-00099'
-       where user_id = $1`,
-      [SEED.trainerPending],
-    );
-    expect(result.affectedRows).toBe(1);
-  });
-
-  it("승인된 트레이너는 사업자 유형·번호를 고칠 수 없다 — 결정 필요 4 추천안", async () => {
-    await expect(
-      queryAs(
-        db,
-        asUser(SEED.trainerApproved),
-        `update public.trainer_profiles
-         set business_type = 'sole_proprietor', business_registration_no = '000-00-00099'
-         where user_id = $1`,
-        [SEED.trainerApproved],
-      ),
-    ).rejects.toThrow(/운영자만/);
-  });
+  ])(
+    "트레이너는 자기 것이라도 %s를 고칠 수 없다 — erd 2장, TRN-02(확정 5)",
+    async (column, value) => {
+      await expect(
+        queryAs(
+          db,
+          pending,
+          `update public.trainer_profiles set ${column} = ${value} where user_id = $1`,
+          [SEED.trainerPending],
+        ),
+      ).rejects.toThrow(/permission denied/);
+    },
+  );
 
   it("트레이너는 다른 트레이너의 프로필을 고칠 수 없다 (0행)", async () => {
     const result = await queryAs(
@@ -309,6 +255,20 @@ describe("trainer_profiles 고치기: 트레이너", () => {
 });
 
 describe("trainer_profiles 고치기: 운영자", () => {
+  it("정지 해제로 다시 승인돼도 승인 시각은 바뀌지 않는다", async () => {
+    const { rows } = await withActor(db, admin, async (tx) => {
+      await tx.query(
+        `update public.trainer_profiles set approval_status = 'approved' where user_id = $1`,
+        [SEED.trainerSuspended],
+      );
+      return tx.query<{ approved_at: Date }>(
+        `select approved_at from public.trainer_profiles where user_id = $1`,
+        [SEED.trainerSuspended],
+      );
+    });
+    expect(rows[0]?.approved_at.toISOString()).toBe("2026-10-31T15:00:00.000Z");
+  });
+
   it("운영자는 pending을 승인하고, 승인 시각이 기록된다 — ADM-01", async () => {
     const { rows } = await withActor(db, admin, async (tx) => {
       await tx.query(
@@ -347,18 +307,6 @@ describe("trainer_profiles 고치기: 운영자", () => {
     expect(result.affectedRows).toBe(2);
   });
 
-  it("운영자는 승인 뒤에도 사업자 유형·번호를 고친다 — 결정 필요 4 추천안", async () => {
-    const result = await queryAs(
-      db,
-      admin,
-      `update public.trainer_profiles
-       set business_type = 'sole_proprietor', business_registration_no = '000-00-00099'
-       where user_id = $1`,
-      [SEED.trainerApproved],
-    );
-    expect(result.affectedRows).toBe(1);
-  });
-
   it("운영자는 트레이너의 프로필 내용을 고칠 수 없다", async () => {
     await expect(
       queryAs(
@@ -371,10 +319,9 @@ describe("trainer_profiles 고치기: 운영자", () => {
   });
 
   it.each([
-    ["payout_seller_id", "'x'"],
-    ["payout_account_masked", "'x'"],
     ["link_slug", "'x'"],
-  ])("운영자도 %s는 고칠 수 없다 (서버만)", async (column, value) => {
+    ["approved_at", "now()"],
+  ])("운영자도 %s는 고칠 수 없다 — TRN-02(확정 5)", async (column, value) => {
     await expect(
       queryAs(
         db,

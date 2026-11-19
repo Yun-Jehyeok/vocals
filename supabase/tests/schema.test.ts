@@ -46,25 +46,14 @@ const DOMAIN_ENUMS: Record<string, readonly string[]> = {
   users_role: USER_ROLES,
   users_status: USER_STATUSES,
   trainer_profiles_approval_status: TRAINER_APPROVAL_STATUSES,
-  trainer_profiles_business_type: BUSINESS_TYPES,
+  trainer_business_profiles_business_type: BUSINESS_TYPES,
 };
 
-/** docs/erd.md 2장 컬럼 (id·created_at 포함). auth_identities는 Supabase Auth로 대신한다. */
+/** docs/erd.md 2장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다. */
 const ERD_COLUMNS: Record<string, string[]> = {
-  users: [
-    "id",
-    "role",
-    "nickname",
-    "profile_image_url",
-    "legal_name",
-    "birth_date",
-    "phone",
-    "identity_key",
-    "status",
-    "withdrawn_at",
-    "purge_after",
-    "created_at",
-  ],
+  users: ["id", "role", "nickname", "profile_image_url", "status", "created_at"],
+  user_private_profiles: ["user_id", "legal_name", "birth_date", "phone", "created_at"],
+  user_account_records: ["user_id", "identity_key", "withdrawn_at", "purge_after", "created_at"],
   trainer_profiles: [
     "user_id",
     "display_name",
@@ -76,11 +65,15 @@ const ERD_COLUMNS: Record<string, string[]> = {
     "approval_status",
     "is_pilot",
     "listed",
+    "approved_at",
+    "created_at",
+  ],
+  trainer_business_profiles: [
+    "trainer_id",
     "business_type",
     "business_registration_no",
     "payout_seller_id",
     "payout_account_masked",
-    "approved_at",
     "created_at",
   ],
   regions: ["id", "sido", "sigungu", "created_at"],
@@ -115,6 +108,20 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
     }
   });
 
+  it("users.id는 Supabase Auth 사용자(auth.users.id)를 가리키고, 로그인 수단 테이블은 public에 없다 — AUTH-01", async () => {
+    const { rows } = await db.query<{ target: string }>(
+      `select confrelid::regclass::text as target
+       from pg_constraint
+       where conrelid = 'public.users'::regclass and contype = 'f'`,
+    );
+    expect(rows.map((row) => row.target)).toEqual(["auth.users"]);
+    await expect(
+      asOwner(
+        `insert into public.users (id, role, nickname) values (gen_random_uuid(), 'student', 'x')`,
+      ),
+    ).rejects.toThrow(/foreign key/);
+  });
+
   it("테이블과 컬럼 이름이 erd 2장과 같고 모두 created_at이 있다", async () => {
     const { rows } = await db.query<{ table_name: string; column_name: string }>(
       `select table_name, column_name
@@ -133,10 +140,10 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
 });
 
 describe("스키마 제약 (erd 2장)", () => {
-  it("users.identity_key는 중복될 수 없다", async () => {
+  it("user_account_records.identity_key는 중복될 수 없다", async () => {
     await expect(
       asOwner(
-        `update public.users set identity_key = 'dummy-identity-key-student-1' where id = $1`,
+        `update public.user_account_records set identity_key = 'dummy-identity-key-student-1' where user_id = $1`,
         [SEED.student2],
       ),
     ).rejects.toThrow(/duplicate key/);
@@ -149,8 +156,7 @@ describe("스키마 제약 (erd 2장)", () => {
         service,
         (tx) =>
           tx.query(
-            `insert into public.trainer_profiles (user_id, business_type, link_slug)
-             values ($1, 'individual', 'seed-approved')`,
+            `insert into public.trainer_profiles (user_id, link_slug) values ($1, 'seed-approved')`,
             [NEW_USER_ID],
           ),
         { setup: createTrainerUser },
@@ -158,7 +164,7 @@ describe("스키마 제약 (erd 2장)", () => {
     ).rejects.toThrow(/duplicate key/);
   });
 
-  it("link_slug는 서버·마이그레이션도 바꿀 수 없다 — 결정 필요 5 추천안", async () => {
+  it("link_slug는 서버·마이그레이션도 바꿀 수 없다 — TRN-02(확정 5)", async () => {
     await expect(
       asOwner(`update public.trainer_profiles set link_slug = 'changed' where user_id = $1`, [
         SEED.trainerPilot,
@@ -174,23 +180,17 @@ describe("스키마 제약 (erd 2장)", () => {
 
   it("role이 trainer가 아닌 사용자는 trainer_profiles를 가질 수 없다 (서버로 넣어도 막힌다) — AUTH-02", async () => {
     await expect(
-      queryAs(
-        db,
-        service,
-        `insert into public.trainer_profiles (user_id, business_type) values ($1, 'individual')`,
-        [SEED.student1],
-      ),
+      queryAs(db, service, `insert into public.trainer_profiles (user_id) values ($1)`, [
+        SEED.student1,
+      ]),
     ).rejects.toThrow(/role = trainer/);
   });
 
   it("사용자당 trainer_profiles는 최대 1개다 — AUTH-02", async () => {
     await expect(
-      queryAs(
-        db,
-        service,
-        `insert into public.trainer_profiles (user_id, business_type) values ($1, 'individual')`,
-        [SEED.trainerApproved],
-      ),
+      queryAs(db, service, `insert into public.trainer_profiles (user_id) values ($1)`, [
+        SEED.trainerApproved,
+      ]),
     ).rejects.toThrow(/duplicate key/);
   });
 
@@ -202,19 +202,28 @@ describe("스키마 제약 (erd 2장)", () => {
     ).rejects.toThrow(/duplicate key/);
   });
 
-  it("개인(individual)은 사업자등록번호가 없고, 사업자는 반드시 있다", async () => {
+  it("개인(individual)은 사업자등록번호가 없고, 사업자는 반드시 있다 — erd 2장, AUTH-04", async () => {
     await expect(
       asOwner(
-        `update public.trainer_profiles set business_registration_no = '000-00-99999' where user_id = $1`,
+        `update public.trainer_business_profiles set business_registration_no = '000-00-99999' where trainer_id = $1`,
         [SEED.trainerApproved],
       ),
     ).rejects.toThrow(/business_registration_no_check/);
     await expect(
       asOwner(
-        `update public.trainer_profiles set business_registration_no = null where user_id = $1`,
+        `update public.trainer_business_profiles set business_registration_no = null where trainer_id = $1`,
         [SEED.trainerUnlisted],
       ),
     ).rejects.toThrow(/business_registration_no_check/);
+  });
+
+  it("trainer_business_profiles는 트레이너 프로필이 있어야 만들 수 있다", async () => {
+    await expect(
+      asOwner(
+        `insert into public.trainer_business_profiles (trainer_id, business_type) values ($1, 'individual')`,
+        [SEED.student1],
+      ),
+    ).rejects.toThrow(/foreign key/);
   });
 
   it("genres에 TRN-08의 10개 장르가 들어 있다", async () => {
@@ -233,14 +242,13 @@ describe("스키마 제약 (erd 2장)", () => {
     ]);
   });
 
-  it("link_slug는 지정하지 않아도 서버가 만든다 — 결정 필요 5 추천안", async () => {
+  it("link_slug는 지정하지 않아도 서버가 만든다 — TRN-02(확정 5)", async () => {
     const { rows } = await withActor(
       db,
       service,
       (tx) =>
         tx.query<{ link_slug: string }>(
-          `insert into public.trainer_profiles (user_id, business_type)
-           values ($1, 'individual') returning link_slug`,
+          `insert into public.trainer_profiles (user_id) values ($1) returning link_slug`,
           [NEW_USER_ID],
         ),
       { setup: createTrainerUser },
@@ -266,8 +274,11 @@ describe("seed (이슈 #11 완료 조건)", () => {
       is_pilot: boolean;
       business_type: string;
     }>(
-      `select approval_status::text, listed, is_pilot, business_type::text from public.trainer_profiles`,
+      `select tp.approval_status::text, tp.listed, tp.is_pilot, tbp.business_type::text
+       from public.trainer_profiles tp
+       join public.trainer_business_profiles tbp on tbp.trainer_id = tp.user_id`,
     );
+    expect(profiles.rows).toHaveLength(6);
     const approved = profiles.rows.filter((row) => row.approval_status === "approved");
     expect(approved).toHaveLength(3);
     expect(approved.filter((row) => !row.listed)).toHaveLength(1);
@@ -281,14 +292,25 @@ describe("seed (이슈 #11 완료 조건)", () => {
     }
   });
 
-  it("seed의 개인정보는 더미 형식이다", async () => {
-    const { rows } = await db.query<{ legal_name: string; phone: string; identity_key: string }>(
-      `select legal_name, phone, identity_key from public.users`,
+  it("seed의 개인정보·연계정보·계좌는 더미 형식이다", async () => {
+    const privateRows = await db.query<{ legal_name: string; phone: string }>(
+      `select legal_name, phone from public.user_private_profiles`,
     );
-    for (const row of rows) {
+    expect(privateRows.rows).toHaveLength(8);
+    for (const row of privateRows.rows) {
       expect(row.legal_name).toMatch(/^가짜/);
       expect(row.phone).toMatch(/^010000000\d\d$/);
-      expect(row.identity_key).toMatch(/^dummy-/);
+    }
+    const records = await db.query<{ identity_key: string }>(
+      `select identity_key from public.user_account_records`,
+    );
+    for (const row of records.rows) expect(row.identity_key).toMatch(/^dummy-/);
+    const business = await db.query<{ payout_account_masked: string | null }>(
+      `select payout_account_masked from public.trainer_business_profiles`,
+    );
+    for (const row of business.rows) {
+      if (row.payout_account_masked)
+        expect(row.payout_account_masked).toMatch(/^테스트은행 00\d\d$/);
     }
   });
 });

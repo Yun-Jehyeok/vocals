@@ -34,7 +34,10 @@ seed 사용자 id는 `tests/helpers/seed-ids.ts`에 있다.
 | 트레이너  | `14`      | pending                                     |
 | 트레이너  | `15`      | rejected, corporation                       |
 | 트레이너  | `16`      | suspended                                   |
-| 운영자    | `99`      |                                             |
+| 운영자    | `99`      | 본인인증 대상이 아니라 개인정보 행 없음     |
+
+- 학생·트레이너는 `user_private_profiles`, `user_account_records` 행이 있다. 트레이너는 모두 `trainer_business_profiles` 행이 있다.
+- 지역(`regions`)은 아직 더미 5개다. 전국 시·군·구 목록(행정안전부 법정동코드)은 원본 파일을 받은 뒤 넣는다.
 
 ### 로컬 Postgres에 적용하기 (선택)
 

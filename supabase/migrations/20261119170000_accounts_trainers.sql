@@ -1,17 +1,18 @@
 -- 묶음 1: 계정·트레이너 (docs/erd.md 2장, 이슈 #11)
 --
--- 만드는 것: users, trainer_profiles, regions, genres, trainer_genres
+-- 만드는 것: users, user_private_profiles, user_account_records, trainer_profiles,
+--           trainer_business_profiles, regions, genres, trainer_genres
 -- 만들지 않는 것
---   - auth_identities: 로그인 수단은 Supabase Auth의 auth.identities가 저장한다.
---     users.id = auth.users.id로 둔다. (erd 2장 변경은 기획 docs PR)
+--   - 로그인 수단 테이블: Supabase Auth의 auth.identities가 저장한다. users.id = auth.users.id
 --   - trainer_profile_videos: videos(5장)에 의존하므로 묶음 4에서 만든다.
 --
 -- 권한 원칙 (tech-stack 3.11)
 --   - 모든 테이블에 RLS를 켠다.
 --   - Supabase는 public 테이블에 anon·authenticated 권한을 기본으로 모두 준다.
---     그래서 테이블마다 먼저 모두 회수하고, 필요한 컬럼만 다시 준다.
---   - 행 단위 규칙은 RLS 정책, 컬럼 단위 규칙은 컬럼 권한(GRANT)으로 한다.
---   - PM 결정에 따라 바뀔 수 있는 규칙은 private 스키마의 함수 하나에 모아 둔다.
+--     그래서 테이블마다 먼저 모두 회수하고 필요한 것만 다시 준다.
+--   - 남에게 숨길 정보는 1:1 별도 테이블에 두고 행 RLS(본인·운영자)로만 막는다. 읽기에 컬럼 권한을 쓰지 않는다.
+--   - 쓰기는 고칠 수 있는 컬럼만 권한(grant update (...))으로 준다.
+--   - PM 결정으로 바뀔 수 있는 규칙은 private 스키마의 함수 하나에 모아 둔다.
 --     바꿀 때는 새 마이그레이션에서 그 함수만 create or replace 한다.
 
 -- ---------------------------------------------------------------------------
@@ -33,14 +34,14 @@ create type public.trainer_profiles_approval_status as enum (
   'rejected',
   'suspended'
 );
-create type public.trainer_profiles_business_type as enum (
+create type public.trainer_business_profiles_business_type as enum (
   'individual',
   'sole_proprietor',
   'corporation'
 );
 
 -- ---------------------------------------------------------------------------
--- users (AUTH-02, AUTH-03, AUTH-06, AUTH-08)
+-- users (AUTH-01, AUTH-02, AUTH-06). 누구나 읽는 공개 정보만 둔다.
 -- 행은 서버 함수(가입·본인인증)가 만든다. 클라이언트는 만들거나 지울 수 없다.
 -- ---------------------------------------------------------------------------
 
@@ -49,20 +50,36 @@ create table public.users (
   role public.users_role not null,
   nickname text not null,
   profile_image_url text,
-  legal_name text,
-  birth_date date,
-  phone text,
-  identity_key text unique,
   status public.users_status not null default 'active',
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- user_private_profiles (AUTH-03, AUTH-09, ADM-07). 본인인증 결과. 개인정보: 로그에 남기지 않는다.
+-- 본인·운영자가 읽는다. 트레이너의 자기 학생 열람(AUTH-09)은 묶음 2에서 정책을 더한다.
+-- 본인인증을 하지 않는 운영자 계정에는 행이 없을 수 있다. 서버만 쓴다.
+-- ---------------------------------------------------------------------------
+
+create table public.user_private_profiles (
+  user_id uuid primary key references public.users (id),
+  legal_name text not null,
+  birth_date date not null,
+  phone text not null,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- user_account_records (AUTH-03, AUTH-08). 중복 가입 확인용 연계정보와 탈퇴 일정.
+-- 본인·운영자만 읽는다. 트레이너에게는 어떤 경우에도 보이지 않는다. 서버만 쓴다.
+-- ---------------------------------------------------------------------------
+
+create table public.user_account_records (
+  user_id uuid primary key references public.users (id),
+  identity_key text unique,
   withdrawn_at timestamptz,
   purge_after timestamptz,
   created_at timestamptz not null default now()
 );
-
-comment on column public.users.legal_name is '본인인증 실명. 개인정보: 로그에 남기지 않는다.';
-comment on column public.users.birth_date is '본인인증 생년월일. 개인정보.';
-comment on column public.users.phone is '본인인증 휴대폰 번호. 개인정보.';
-comment on column public.users.identity_key is '중복 가입 확인용 연계정보. 개인정보.';
 
 -- ---------------------------------------------------------------------------
 -- regions, genres (TRN-08). 마이그레이션·seed로만 바뀐다.
@@ -100,7 +117,7 @@ values
 -- 내부 함수
 -- ---------------------------------------------------------------------------
 
--- 지금 로그인한 사용자의 역할. RLS를 거치지 않고 읽어야 정책끼리 서로 부르지 않는다.
+-- 사용자의 역할. RLS를 거치지 않고 읽어야 정책끼리 서로 부르지 않는다.
 create function private.user_role(target_user_id uuid)
 returns public.users_role
 language sql
@@ -112,7 +129,7 @@ as $$
 $$;
 
 -- 운영자인가 (ADM-06: 운영자 기능도 운영자 계정 + RLS로 동작한다)
--- 탈퇴한 운영자 계정은 운영자 권한을 잃는다.
+-- 탈퇴한 운영자 계정은 운영자 권한을 잃는다(AUTH-07).
 create function private.is_admin()
 returns boolean
 language sql
@@ -129,8 +146,8 @@ as $$
   )
 $$;
 
--- [PM 결정 대기: 이슈 #11 결정 필요 2] 본인·운영자가 아닌 사람(anon 포함)에게 보이는 프로필 상태.
--- 추천안: approved만. suspended는 본인·운영자만 (기존 수강생 열람은 묶음 2에서 추가).
+-- [ADM-02, 이슈 #11 확정 2] 본인·운영자가 아닌 사람(anon 포함)에게 보이는 프로필 상태: approved만.
+-- suspended 프로필의 기존 수강생 열람은 묶음 2에서 정책을 더한다.
 -- listed = false여도 링크로 열리므로 여기서는 listed를 보지 않는다 (MKT-07, TRN-02).
 create function private.trainer_profile_is_public(status public.trainer_profiles_approval_status)
 returns boolean
@@ -141,8 +158,8 @@ as $$
   select status = 'approved'
 $$;
 
--- [PM 결정 대기: 이슈 #11 결정 필요 4] 트레이너 본인이 사업자 유형·번호를 고칠 수 있는 상태.
--- 추천안: pending 동안만. 그 뒤로는 운영자만 고친다.
+-- [AUTH-04, 이슈 #11 확정 4] 트레이너 본인이 사업자 유형·번호를 고칠 수 있는 상태: pending만.
+-- 운영자는 언제든 고친다.
 create function private.trainer_can_edit_business_info(
   status public.trainer_profiles_approval_status
 )
@@ -154,8 +171,8 @@ as $$
   select status = 'pending'
 $$;
 
--- [PM 결정 대기: 이슈 #11 결정 필요 5] 프로필 링크는 서버(DB)가 만들고 바꿀 수 없다.
--- 형식(소문자 16진수 12자리)은 임시다. 중복은 unique 제약이 막는다.
+-- [TRN-02, 이슈 #11 확정 5] 프로필 링크는 DB가 만들고 아무도 바꿀 수 없다.
+-- 형식(소문자 16진수 12자리)은 구현 선택이다. 중복은 unique 제약이 막는다.
 create function private.generate_link_slug()
 returns text
 language sql
@@ -180,28 +197,25 @@ create table public.trainer_profiles (
   approval_status public.trainer_profiles_approval_status not null default 'pending',
   is_pilot boolean not null default false,
   listed boolean not null default true,
-  business_type public.trainer_profiles_business_type not null,
-  business_registration_no text,
-  payout_seller_id text,
-  payout_account_masked text,
   approved_at timestamptz,
-  created_at timestamptz not null default now(),
-  -- erd 2장: 개인(individual)이면 사업자등록번호가 없고, 사업자이면 함께 저장한다.
-  constraint trainer_profiles_business_registration_no_check check (
-    (business_type = 'individual' and business_registration_no is null)
-    or (business_type <> 'individual' and business_registration_no is not null)
-  )
+  created_at timestamptz not null default now()
 );
 
-comment on column public.trainer_profiles.business_registration_no is
-  '사업자등록번호. 본인·운영자만 읽는다.';
-comment on column public.trainer_profiles.payout_seller_id is
-  '포트원 파트너 정산 ID. 서버만 쓴다.';
-comment on column public.trainer_profiles.payout_account_masked is
-  '은행명·끝 4자리. 계좌번호 전체는 저장하지 않는다.';
+create index trainer_profiles_region_id_idx on public.trainer_profiles (region_id);
+
+-- 트레이너 프로필의 승인 상태. RLS를 거치지 않고 읽는다.
+create function private.trainer_approval_status(target_trainer_id uuid)
+returns public.trainer_profiles_approval_status
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select tp.approval_status from public.trainer_profiles tp where tp.user_id = target_trainer_id
+$$;
 
 -- 클라이언트(anon·authenticated)의 쓰기를 컬럼 권한·정책보다 한 번 더 확인한다.
--- 서버(service_role)와 마이그레이션에는 역할 확인과 approved_at 기록만 적용한다.
+-- 서버(service_role)와 마이그레이션에는 역할 확인, 링크 고정, approved_at 기록만 적용한다.
 create function private.trainer_profiles_before_write()
 returns trigger
 language plpgsql
@@ -224,8 +238,7 @@ begin
 
     if is_client then
       if private.is_admin() then
-        -- ADM-01~03, PLT-01: 운영자는 승인 상태·파일럿·사업자 정보만 바꾼다.
-        -- 프로필 내용은 트레이너 본인이 고친다.
+        -- ADM-01~03, PLT-01: 운영자는 승인 상태·파일럿만 바꾼다. 프로필 내용은 트레이너 본인이 고친다.
         if (new.display_name, new.bio, new.career, new.lesson_place, new.region_id, new.listed)
           is distinct from
           (old.display_name, old.bio, old.career, old.lesson_place, old.region_id, old.listed)
@@ -233,24 +246,15 @@ begin
           raise exception '운영자는 트레이너 프로필 내용을 고칠 수 없다'
             using errcode = 'insufficient_privilege';
         end if;
-      else
+      elsif (new.approval_status, new.is_pilot) is distinct from (old.approval_status, old.is_pilot)
+      then
         -- ADM-01, ADM-03, PLT-01: 승인 상태와 파일럿은 운영자만 바꾼다.
-        if (new.approval_status, new.is_pilot) is distinct from (old.approval_status, old.is_pilot)
-        then
-          raise exception 'approval_status, is_pilot은 운영자만 바꿀 수 있다'
-            using errcode = 'insufficient_privilege';
-        end if;
-        if (new.business_type, new.business_registration_no)
-          is distinct from (old.business_type, old.business_registration_no)
-          and not private.trainer_can_edit_business_info(old.approval_status)
-        then
-          raise exception '승인 대기 중이 아니면 사업자 정보는 운영자만 바꿀 수 있다'
-            using errcode = 'insufficient_privilege';
-        end if;
+        raise exception 'approval_status, is_pilot은 운영자만 바꿀 수 있다'
+          using errcode = 'insufficient_privilege';
       end if;
     end if;
 
-    -- 처음 승인될 때 승인 시각을 남긴다.
+    -- 처음 승인될 때만 승인 시각을 남긴다. 정지 해제로 다시 승인돼도 바꾸지 않는다.
     if new.approval_status = 'approved'
       and old.approval_status <> 'approved'
       and old.approved_at is null
@@ -268,6 +272,30 @@ before insert or update on public.trainer_profiles
 for each row execute function private.trainer_profiles_before_write();
 
 -- ---------------------------------------------------------------------------
+-- trainer_business_profiles (AUTH-04, T-23, A-01, A-05). 사업자·정산 정보.
+-- 그 트레이너 본인과 운영자만 읽는다. 정산 계좌번호 전체는 저장하지 않는다.
+-- ---------------------------------------------------------------------------
+
+create table public.trainer_business_profiles (
+  trainer_id uuid primary key references public.trainer_profiles (user_id),
+  business_type public.trainer_business_profiles_business_type not null,
+  business_registration_no text,
+  payout_seller_id text,
+  payout_account_masked text,
+  created_at timestamptz not null default now(),
+  -- erd 2장: 개인(individual)이면 사업자등록번호가 없고, 사업자이면 함께 저장한다.
+  constraint trainer_business_profiles_business_registration_no_check check (
+    (business_type = 'individual' and business_registration_no is null)
+    or (business_type <> 'individual' and business_registration_no is not null)
+  )
+);
+
+comment on column public.trainer_business_profiles.payout_seller_id is
+  '포트원 파트너 정산 ID. 서버가 PG 등록 후 쓴다.';
+comment on column public.trainer_business_profiles.payout_account_masked is
+  '은행명·끝 4자리. 서버가 쓴다.';
+
+-- ---------------------------------------------------------------------------
 -- trainer_genres (TRN-08)
 -- ---------------------------------------------------------------------------
 
@@ -280,32 +308,25 @@ create table public.trainer_genres (
 );
 
 create index trainer_genres_genre_id_idx on public.trainer_genres (genre_id);
-create index trainer_profiles_region_id_idx on public.trainer_profiles (region_id);
 
 -- ---------------------------------------------------------------------------
 -- 함수 실행 권한
 -- ---------------------------------------------------------------------------
 
 revoke all on all functions in schema private from public;
-grant execute on function private.user_role(uuid) to anon, authenticated, service_role;
-grant execute on function private.is_admin() to anon, authenticated, service_role;
-grant execute on function private.trainer_profile_is_public(public.trainer_profiles_approval_status)
-  to anon, authenticated, service_role;
-grant execute on function private.trainer_can_edit_business_info(
-  public.trainer_profiles_approval_status
-) to anon, authenticated, service_role;
-grant execute on function private.generate_link_slug() to anon, authenticated, service_role;
-grant execute on function private.trainer_profiles_before_write()
-  to anon, authenticated, service_role;
+grant execute on all functions in schema private to anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- RLS 켜기 (모든 테이블)
 -- ---------------------------------------------------------------------------
 
 alter table public.users enable row level security;
+alter table public.user_private_profiles enable row level security;
+alter table public.user_account_records enable row level security;
 alter table public.regions enable row level security;
 alter table public.genres enable row level security;
 alter table public.trainer_profiles enable row level security;
+alter table public.trainer_business_profiles enable row level security;
 alter table public.trainer_genres enable row level security;
 
 -- ---------------------------------------------------------------------------
@@ -314,20 +335,18 @@ alter table public.trainer_genres enable row level security;
 
 revoke all on table
   public.users,
+  public.user_private_profiles,
+  public.user_account_records,
   public.regions,
   public.genres,
   public.trainer_profiles,
+  public.trainer_business_profiles,
   public.trainer_genres
 from anon, authenticated;
 
 -- users ---------------------------------------------------------------------
--- [PM 결정 대기: 이슈 #11 결정 필요 3] 남에게 보이는 users 컬럼.
--- 추천안: 닉네임·사진만 (트레이너도 학생의 실명·생년월일·휴대폰을 보지 못한다).
--- 실명·생년월일·휴대폰·연계정보·탈퇴 일정은 클라이언트 권한에서 뺀다.
--- 본인·운영자가 이 컬럼을 읽는 방법은 기획 질문 대기 중이다(뷰·별도 테이블·함수 등 새 이름 필요).
-grant select (id, role, nickname, profile_image_url, status, created_at)
-  on public.users to anon, authenticated;
--- AUTH-06, C-05: 본인은 닉네임과 프로필 사진만 고친다.
+grant select on public.users to anon, authenticated;
+-- AUTH-06, C-05: 본인은 닉네임과 프로필 사진만 고친다. role·status는 서버만 바꾼다.
 grant update (nickname, profile_image_url) on public.users to authenticated;
 
 create policy users_select on public.users
@@ -338,6 +357,18 @@ create policy users_update_own on public.users
 for update to authenticated
 using (id = (select auth.uid()))
 with check (id = (select auth.uid()));
+
+-- user_private_profiles, user_account_records --------------------------------
+-- 클라이언트는 읽기만 한다(본인·운영자 행). 만들기·고치기·지우기는 서버가 한다.
+grant select on public.user_private_profiles, public.user_account_records to authenticated;
+
+create policy user_private_profiles_select on public.user_private_profiles
+for select to authenticated
+using (user_id = (select auth.uid()) or (select private.is_admin()));
+
+create policy user_account_records_select on public.user_account_records
+for select to authenticated
+using (user_id = (select auth.uid()) or (select private.is_admin()));
 
 -- regions, genres -----------------------------------------------------------
 grant select on public.regions, public.genres to anon, authenticated;
@@ -351,37 +382,13 @@ for select to anon, authenticated
 using (true);
 
 -- trainer_profiles ----------------------------------------------------------
--- 사업자 정보·정산 정보(business_type, business_registration_no, payout_seller_id,
--- payout_account_masked)는 클라이언트 읽기 권한에서 뺀다. (S-01 표시 항목에 없음)
-grant select (
-  user_id,
-  display_name,
-  bio,
-  career,
-  lesson_place,
-  region_id,
-  link_slug,
-  approval_status,
-  is_pilot,
-  listed,
-  approved_at,
-  created_at
-) on public.trainer_profiles to anon, authenticated;
+grant select on public.trainer_profiles to anon, authenticated;
 
--- AUTH-04, T-01: 트레이너가 가입 신청할 때 만든다. 승인 상태·파일럿·링크·정산 정보는 넣을 수 없다.
-grant insert (
-  user_id,
-  display_name,
-  bio,
-  career,
-  lesson_place,
-  region_id,
-  listed,
-  business_type,
-  business_registration_no
-) on public.trainer_profiles to authenticated;
+-- AUTH-04, T-01: 트레이너가 가입 신청할 때 만든다. 승인 상태·파일럿·링크·승인 시각은 넣을 수 없다.
+grant insert (user_id, display_name, bio, career, lesson_place, region_id, listed)
+  on public.trainer_profiles to authenticated;
 
--- 트레이너 본인(프로필 내용, pending 동안 사업자 정보)과 운영자(승인 상태·파일럿·사업자 정보)가 고친다.
+-- 트레이너 본인(프로필 내용)과 운영자(승인 상태·파일럿)가 고친다.
 -- 누가 어떤 컬럼을 바꾸는지는 trainer_profiles_before_write 트리거가 나눈다.
 grant update (
   display_name,
@@ -390,8 +397,6 @@ grant update (
   lesson_place,
   region_id,
   listed,
-  business_type,
-  business_registration_no,
   approval_status,
   is_pilot
 ) on public.trainer_profiles to authenticated;
@@ -415,6 +420,38 @@ create policy trainer_profiles_update on public.trainer_profiles
 for update to authenticated
 using (user_id = (select auth.uid()) or (select private.is_admin()))
 with check (user_id = (select auth.uid()) or (select private.is_admin()));
+
+-- trainer_business_profiles -------------------------------------------------
+grant select on public.trainer_business_profiles to authenticated;
+-- 정산 정보(payout_seller_id, payout_account_masked)는 서버만 쓴다.
+grant insert (trainer_id, business_type, business_registration_no)
+  on public.trainer_business_profiles to authenticated;
+grant update (business_type, business_registration_no)
+  on public.trainer_business_profiles to authenticated;
+
+create policy trainer_business_profiles_select on public.trainer_business_profiles
+for select to authenticated
+using (trainer_id = (select auth.uid()) or (select private.is_admin()));
+
+-- AUTH-04, T-01: 트레이너가 가입 신청할 때 자기 프로필에 붙여 만든다.
+create policy trainer_business_profiles_insert_own on public.trainer_business_profiles
+for insert to authenticated
+with check (trainer_id = (select auth.uid()));
+
+-- 확정 4: 트레이너 본인은 pending 동안만 고친다.
+create policy trainer_business_profiles_update_own on public.trainer_business_profiles
+for update to authenticated
+using (
+  trainer_id = (select auth.uid())
+  and private.trainer_can_edit_business_info(private.trainer_approval_status(trainer_id))
+)
+with check (trainer_id = (select auth.uid()));
+
+-- 확정 4: 운영자는 언제든 고친다.
+create policy trainer_business_profiles_update_admin on public.trainer_business_profiles
+for update to authenticated
+using ((select private.is_admin()))
+with check ((select private.is_admin()));
 
 -- trainer_genres ------------------------------------------------------------
 grant select on public.trainer_genres to anon, authenticated;

@@ -33,13 +33,7 @@ export const ALL_TRAINER_IDS: readonly string[] = [
 /** 테스트에서 새로 만드는 사용자 id (seed와 겹치지 않는다) */
 export const NEW_USER_ID = "00000000-0000-4000-8000-0000000000a1";
 
-/** 클라이언트에게 숨기는 users 개인정보 컬럼 (AUTH-06, CHAT-04) */
-export const USER_PRIVATE_COLUMNS = ["legal_name", "birth_date", "phone", "identity_key"] as const;
-
-/** 본인·운영자 외에는 읽을 수 없는 trainer_profiles 컬럼 (S-01, T-23, A-05) */
-export const TRAINER_PRIVATE_COLUMNS = [
-  "business_type",
-  "business_registration_no",
-  "payout_seller_id",
-  "payout_account_masked",
-] as const;
+/** 본인인증 결과가 있는 사용자 (운영자 제외, AUTH-03) */
+export const VERIFIED_USER_IDS: readonly string[] = ALL_SEED_USER_IDS.filter(
+  (id) => id !== SEED.admin,
+);
