@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+.expo
+.next
+pnpm-lock.yaml
+docs
