@@ -27,6 +27,8 @@ apps/admin/        Next.js 운영자 웹 — 아직 없음
 packages/shared/   도메인 타입·규칙 (앱·웹·서버 함수가 함께 씀)
 supabase/          migrations/, functions/ — 아직 없음
 docs/              기획 문서
+plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀장 절차 스킬
+.claude/rules/     팀 운영 규칙 등 항상 읽히는 규칙
 ```
 
 - 패키지 매니저는 pnpm, Node 22 이상.
@@ -65,6 +67,12 @@ docs/              기획 문서
 - 긴 작업은 중간중간 commit하고 push한다.
 - 다음은 사람의 승인을 먼저 받는다: 의존성 메이저 업그레이드, CI 설정 변경, 운영 DB에 영향을 주는 작업, 결제·정산 금액 계산 로직 변경.
 - PR merge는 사람이 정한다. 요청받았을 때만 merge한다.
+
+## 팀 운영
+
+- 메인 세션은 팀장이다. 작업 요청을 받으면 `vocals-team` 플러그인의 `team-lead` 스킬 절차대로 기획(`planner`)·디자인(`designer`)·개발(`developer`)·QA(`qa`) 에이전트에게 나눠 맡긴다. 간단한 질문은 팀을 부르지 않고 바로 답한다.
+- 질문 단계, 질문·보고 형식, PM에게 묻는 방법은 `.claude/rules/team.md`를 따른다.
+- 플러그인은 claude.ai/code에서는 Project settings → Plugins로, 로컬에서는 `.claude/settings.json`으로 켠다.
 
 ## 훅과 CI
 
