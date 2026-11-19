@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.expo/
+.next/
+*.log
+.DS_Store
+
+# 비밀 값은 커밋하지 않는다
+.env
+.env.*
+!.env.example
+
+# Claude Code 개인 설정
+.claude/settings.local.json
