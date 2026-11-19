@@ -1,4 +1,12 @@
 {
+  "extraKnownMarketplaces": {
+    "vocals": {
+      "source": { "source": "github", "repo": "Yun-Jehyeok/vocals" }
+    }
+  },
+  "enabledPlugins": {
+    "vocals-team@vocals": true
+  },
   "hooks": {
     "PreToolUse": [
       {

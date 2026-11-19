@@ -27,6 +27,8 @@ apps/admin/        Next.js 운영자 웹 — 아직 없음
 packages/shared/   도메인 타입·규칙 (앱·웹·서버 함수가 함께 씀)
 supabase/          migrations/, functions/ — 아직 없음
 docs/              기획 문서
+plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀장 절차 스킬
+.claude/rules/     팀 운영 규칙 등 항상 읽히는 규칙
 ```
 
 - 패키지 매니저는 pnpm, Node 22 이상.
@@ -62,9 +64,16 @@ docs/              기획 문서
 - main에서 브랜치를 따고, 작업 하나당 draft PR 하나를 연다. main에 직접 push하지 않는다.
 - 커밋 메시지는 `종류: 요약` 형식이다. 종류는 feat, fix, refactor, test, docs, chore.
 - 필요한 시크릿, API, 권한이 없으면 mock으로 대신하지 않는다. 무엇이 없는지 말하고 멈춘다.
+  - 예외(PM 결정, 2026-11-19): Supabase 테스트 프로젝트가 준비되기 전까지는 로컬 DB와 더미(seed) 데이터로 개발·테스트한다. 원격 Supabase 프로젝트를 새로 만들지 않는다. 이 예외는 Supabase에만 해당한다. 포트원, Mux 같은 다른 외부 서비스는 위 규칙을 따른다.
 - 긴 작업은 중간중간 commit하고 push한다.
 - 다음은 사람의 승인을 먼저 받는다: 의존성 메이저 업그레이드, CI 설정 변경, 운영 DB에 영향을 주는 작업, 결제·정산 금액 계산 로직 변경.
 - PR merge는 사람이 정한다. 요청받았을 때만 merge한다.
+
+## 팀 운영
+
+- 메인 세션은 팀장이다. 작업 요청을 받으면 `vocals-team` 플러그인의 `team-lead` 스킬 절차대로 기획(`planner`)·디자인(`designer`)·개발(`developer`)·QA(`qa`) 에이전트에게 나눠 맡긴다. 간단한 질문은 팀을 부르지 않고 바로 답한다.
+- 질문 단계, 질문·보고 형식, PM에게 묻는 방법은 `.claude/rules/team.md`를 따른다.
+- 플러그인은 claude.ai/code에서는 Project settings → Plugins로, 로컬에서는 `.claude/settings.json`으로 켠다.
 
 ## 훅과 CI
 
