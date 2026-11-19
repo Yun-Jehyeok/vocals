@@ -74,7 +74,9 @@ erDiagram
         enum approval_status "pending, approved, rejected, suspended"
         bool is_pilot
         bool listed "트레이너 찾기 노출"
-        string payout_seller_id "PG 지급대행 셀러 ID"
+        enum business_type "individual, sole_proprietor, corporation"
+        string business_registration_no "개인이면 없음"
+        string payout_seller_id "포트원 파트너 정산 ID"
         string payout_account_masked "은행·끝 4자리"
         timestamp approved_at
     }
@@ -104,6 +106,7 @@ erDiagram
 - 탈퇴하면 `status = withdrawn`, `purge_after = 탈퇴일 + 약 6개월`로 두고, 그날이 지나면 계정 정보와 영상을 지운다. 결제·정산 기록은 법정 기간 동안 남긴다. (AUTH-08)
 - 승인 전(`pending`)에는 `link_slug`로 프로필을 열 수 없다. 목록에는 `approved`이면서 `listed = true`인 트레이너만 나온다. (AUTH-05, MKT-01, MKT-07)
 - 프로필 영상은 3개까지다. (TRN-07)
+- 트레이너의 사업자 유형(`business_type`)을 저장한다. 사업자등록이 없는 개인(`individual`)도 받는다. 사업자이면 사업자등록번호를 함께 저장한다.
 - 정산 계좌번호 전체는 저장하지 않는다. 트레이너가 계좌를 입력하면 서버가 PG 지급대행에 셀러로 등록하고, PG가 준 셀러 ID(`payout_seller_id`)와 "은행명·끝 4자리"(`payout_account_masked`)만 저장한다. 매달 지급할 때는 셀러 ID와 금액만 PG에 보낸다. 계좌를 바꾸면 PG에 다시 등록한다. PG별 등록 절차는 계약할 때 확인한다.
 
 ## 3. 상품·결제·수강권
@@ -281,7 +284,9 @@ erDiagram
         enum upload_status "uploading, ready, failed"
         enum visibility "private — 2단계 대비"
         bool hidden_in_library "보관함에서 숨김"
-        timestamp purge_after "탈퇴 시 삭제 예정일"
+        uuid ticket_id FK "연습 영상이면 그 수강권"
+        timestamp purge_after "삭제 예정일"
+        timestamp purge_notified_at "삭제 예고 알림 보낸 때"
     }
     homeworks {
         uuid id PK
@@ -320,6 +325,7 @@ erDiagram
 - 숙제 상태는 따로 저장하지 않는다. 그 학생의 `submissions`가 있으면 "제출됨", 없으면 "미제출"이다. 여러 번 제출하면 여러 줄이 쌓인다. (HW-07, HW-11)
 - 연습 영상 없이는 제출을 만들 수 없다(`video_id` 필수). (HW-06)
 - 시점 코멘트는 `at_sec`가 있는 피드백, 텍스트 코멘트는 `at_sec`가 없는 피드백이다. (HW-10)
+- 연습 영상은 `ticket_id`로 수강권과 연결한다. 수강권이 끝나면(`ended`) `purge_after = 종료일 + 1년`으로 정하고, 그 한 달 전에 학생에게 삭제 예고 알림을 보낸 뒤(`purge_notified_at`) 날짜가 되면 지운다. 예시 영상과 프로필 영상은 지우지 않는다. 탈퇴하면 탈퇴 규칙(약 6개월)이 더 빠르면 그 날짜를 쓴다. (HW-14)
 - 숙제 영상은 해당 트레이너, 숙제를 받은 학생, 운영자만 볼 수 있다. 그룹 숙제라도 다른 학생의 제출은 보이지 않는다. (HW-12, NFR-04)
 
 ## 6. 정산
@@ -344,6 +350,7 @@ erDiagram
         int gross_amount "차감 회차 금액 합"
         int fee_amount
         int fee_vat
+        int withholding_tax "개인 트레이너 3.3%"
         int payout_amount
         enum status "open, confirmed, paid"
         timestamp paid_at
@@ -360,6 +367,7 @@ erDiagram
 - 차감된 출결(`deducted = true`) 한 줄이 정산 항목 한 줄이 된다. 그 달에 차감된 항목을 모아 다음 달에 지급한다. (STL-02, STL-04)
 - 수수료율은 유입 경로별로 `fee_policies`에 두고, 결제할 때 수강권에 복사한다. 마켓플레이스 수수료율은 아직 정하지 않았다(`docs/idea.md` 결정 필요 4). (STL-03)
 - 파일럿 무료 수강권(`price_paid = 0`)은 정산 항목을 만들지 않는다. (STL-06)
+- 개인 트레이너(`business_type = individual`)에게 지급할 때는 3.3%를 원천징수해 `withholding_tax`에 기록하고 그만큼 빼고 지급한다. (STL-07)
 - 정산이 `confirmed`가 되면 그 달의 출결은 더 고칠 수 없다. (ATT-06)
 - 트레이너가 끝까지 체크하지 않은 출결(`none`)은 자동으로 바꾸지 않고, 정산되지 않는다.
 
