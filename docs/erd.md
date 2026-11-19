@@ -260,7 +260,7 @@ erDiagram
   - `pre_canceled`(사전 취소): 차감 없음. 학생 취소는 레슨 24시간 전까지만 된다. (SCH-05)
   - 트레이너가 회차를 취소하면 회차 `status = canceled`, 참여 학생 전원 `pre_canceled`. (SCH-06)
 - 보강은 `kind = makeup`인 회차다. 그룹 반 학생도 개별 보강 회차로 잡는다. (SCH-08)
-- `session_amount`는 차감 시점에 `수강권 price_paid ÷ total_sessions`로 채운다. 정산은 이 값을 모은다. (STL-02)
+- `session_amount`는 차감 시점에 채운다. 기본값은 `floor(price_paid ÷ total_sessions)`이고, 그 수강권의 마지막 차감(`remaining_sessions`가 0이 되는 차감)에는 나머지 `price_paid − 기본값 × total_sessions`를 더한다. 그래서 한 수강권의 회차 금액을 모두 더하면 결제 금액과 같다. 정산은 이 값을 모은다. 계산은 `packages/shared`의 함수로 한다. (STL-02)
 - 일회권은 `kind = single` 회차 하나다. (SCH-02)
 
 ## 5. 숙제·영상·피드백
