@@ -35,6 +35,8 @@ importers:
 
   packages/shared: {}
 
+  scripts: {}
+
   supabase:
     devDependencies:
       '@electric-sql/pglite':
