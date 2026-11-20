@@ -1,0 +1,484 @@
+// vocals-team 플러그인 훅 단위 테스트 (이슈 #17 하네스 2단계)
+// 임시 git 저장소에 vocals 레포 모양을 만들고, 훅 스크립트에 입력 JSON을 넣어
+// 차단(종료 코드 2 + "왜/대신 할 일" 메시지)과 허용(종료 코드 0)을 표로 확인한다.
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { PROTECTED_PATHS } from "./acceptance-guard.ts";
+
+const PLUGIN = fileURLToPath(new URL("../plugins/vocals-team/", import.meta.url));
+const HOOKS = join(PLUGIN, "hooks");
+const ACCEPTANCE_GUARD = fileURLToPath(new URL("./acceptance-guard.ts", import.meta.url));
+
+const OLD_MIGRATION = "supabase/migrations/20260101000000_init.sql";
+const BRANCH_MIGRATION = "supabase/migrations/20260201000000_branch.sql";
+const QA_COMMIT = "test: 인수 테스트\n\nAcceptance: qa\nCo-Authored-By: test <t@example.com>";
+
+let repo: string;
+let outside: string;
+
+function git(...args: string[]) {
+  return execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "init.defaultBranch=main",
+      ...args,
+    ],
+    { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+}
+
+function write(file: string, content: string) {
+  const path = join(repo, file);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+}
+
+beforeAll(() => {
+  repo = mkdtempSync(join(tmpdir(), "plugin-hooks-"));
+  outside = mkdtempSync(join(tmpdir(), "plugin-hooks-outside-"));
+  git("init", "-q");
+  const files: Record<string, string> = {
+    "plugins/vocals-team/.claude-plugin/plugin.json": "{}",
+    "plugins/vocals-team/agents/qa.md": "# qa",
+    "plugins/vocals-team/hooks/guard-bash.mjs": "",
+    "scripts/acceptance-guard.ts": readFileSync(ACCEPTANCE_GUARD, "utf8"),
+    "scripts/req-trace-baseline.txt": "",
+    "docs/prd.md": "# PRD",
+    "CLAUDE.md": "# CLAUDE",
+    ".claude/rules/team.md": "# team",
+    ".env.example": "KEY=",
+    [OLD_MIGRATION]: "create table a ();",
+    "supabase/seed.sql": "",
+    "supabase/tests/acceptance/17-example.test.ts": "",
+    "supabase/tests/helpers/db.ts": "",
+    "supabase/tests/helpers/rls-matrix.ts": "",
+    "supabase/tests/helpers/seed-ids.ts": "",
+    "supabase/tests/users.test.ts": "",
+    "packages/shared/src/rule.ts": "",
+    "packages/shared/src/rule.test.ts": "",
+    "apps/mobile/App.tsx": "",
+  };
+  for (const [file, content] of Object.entries(files)) write(file, content);
+  git("add", "-A");
+  git("commit", "-q", "-m", "chore: 시작");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("checkout", "-q", "-b", "work");
+  write(BRANCH_MIGRATION, "create table b ();");
+  git("add", "-A");
+  git("commit", "-q", "-m", "feat: 브랜치 마이그레이션");
+  write("supabase/tests/acceptance/17-example.test.ts", "// qa");
+  git("add", "-A");
+  git("commit", "-q", "-m", QA_COMMIT);
+  write("msg.txt", "feat: x\n\nAcceptance: qa\n");
+});
+
+afterAll(() => {
+  rmSync(repo, { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
+});
+
+interface HookResult {
+  status: number | null;
+  stderr: string;
+}
+
+function runHook(script: string, input: unknown): HookResult {
+  const result = spawnSync(process.execPath, [join(HOOKS, script)], {
+    input: typeof input === "string" ? input : JSON.stringify(input),
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+  });
+  return { status: result.status, stderr: result.stderr };
+}
+
+function expectVerdict(result: HookResult, expected: "차단" | "허용", reason?: string) {
+  if (expected === "허용") {
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    return;
+  }
+  expect(result.status).toBe(2);
+  expect(result.stderr).toContain("차단됨(vocals-team 훅)");
+  expect(result.stderr).toContain("왜: ");
+  expect(result.stderr).toContain("대신 할 일: ");
+  if (reason) expect(result.stderr).toContain(reason);
+}
+
+const roleInput = (role: string | undefined) => (role ? { agent_type: role } : {});
+
+// 차단 사유를 가리키는 메시지 조각
+const DOCS = "docs/는 기획 담당";
+const ACCEPT = "인수 테스트와 판정 헬퍼는 QA 담당";
+const MIGRATION = "기존 마이그레이션";
+const ENV = ".env 파일";
+const QA_ONLY = "QA는 테스트 파일";
+const PLANNER = "기획은 docs/";
+const DESIGNER = "코드(apps/";
+const TRAILER = "`Acceptance:` 트레일러";
+
+type Row = [role: string | undefined, path: string, verdict: "차단" | "허용", reason?: string];
+
+describe("guard-files: 파일 쓰기 도구의 역할별·전역 차단 (이슈 #17)", () => {
+  const rows: Row[] = [
+    // 메인 세션(팀장): 역할 차단 없음, 전역 규칙만
+    [undefined, "docs/prd.md", "허용"],
+    [undefined, "packages/shared/src/rule.ts", "허용"],
+    [undefined, OLD_MIGRATION, "차단", MIGRATION],
+    [undefined, ".env", "차단", ENV],
+    [undefined, ".env.local", "차단", ENV],
+    [undefined, ".env.example", "허용"],
+    [undefined, BRANCH_MIGRATION, "허용"],
+    // 역할이 아닌 에이전트(general-purpose 등)
+    ["general-purpose", "docs/prd.md", "허용"],
+    ["general-purpose", OLD_MIGRATION, "차단", MIGRATION],
+    // developer
+    ["developer", "docs/prd.md", "차단", DOCS],
+    ["vocals-team:developer", "docs/new.md", "차단", DOCS],
+    ["developer", "supabase/tests/acceptance/17-example.test.ts", "차단", ACCEPT],
+    ["developer", "supabase/tests/acceptance/21-new.test.ts", "차단", ACCEPT],
+    ["developer", "tests/acceptance/e2e/login.spec.ts", "차단", ACCEPT],
+    ["developer", "supabase/tests/helpers/db.ts", "차단", ACCEPT],
+    ["developer", OLD_MIGRATION, "차단", MIGRATION],
+    ["developer", BRANCH_MIGRATION, "허용"],
+    ["developer", "supabase/migrations/20260301000000_next.sql", "허용"],
+    ["developer", "supabase/seed.sql", "허용"],
+    ["developer", "supabase/tests/helpers/seed-ids.ts", "허용"],
+    ["developer", "supabase/tests/users.test.ts", "허용"],
+    ["developer", "packages/shared/src/rule.ts", "허용"],
+    ["developer", ".env", "차단", ENV],
+    // qa
+    ["qa", "supabase/tests/acceptance/17-example.test.ts", "허용"],
+    ["vocals-team:qa", "supabase/tests/helpers/db.ts", "허용"],
+    ["qa", "packages/shared/src/rule.test.ts", "허용"],
+    ["qa", "tests/acceptance/e2e/login.spec.ts", "허용"],
+    ["qa", "scripts/req-trace-baseline.txt", "허용"],
+    ["qa", "packages/shared/src/rule.ts", "차단", QA_ONLY],
+    ["qa", "supabase/seed.sql", "차단", QA_ONLY],
+    ["qa", "supabase/migrations/20260301000000_next.sql", "차단", QA_ONLY],
+    ["qa", "docs/prd.md", "차단", QA_ONLY],
+    ["qa", "scripts/acceptance-guard.ts", "차단", QA_ONLY],
+    // planner
+    ["planner", "docs/prd.md", "허용"],
+    ["planner", "docs/decisions.md", "허용"],
+    ["planner", "CLAUDE.md", "허용"],
+    ["planner", ".claude/rules/team.md", "허용"],
+    ["planner", "plugins/vocals-team/agents/qa.md", "허용"],
+    ["planner", "plugins/vocals-team/hooks/guard-bash.mjs", "차단", PLANNER],
+    ["planner", "packages/shared/src/rule.ts", "차단", PLANNER],
+    ["planner", ".github/workflows/ci.yml", "차단", PLANNER],
+    // designer
+    ["designer", "docs/design.md", "허용"],
+    ["designer", "CLAUDE.md", "허용"],
+    ["designer", "apps/mobile/App.tsx", "차단", DESIGNER],
+    ["designer", "packages/shared/src/rule.ts", "차단", DESIGNER],
+    ["designer", "supabase/seed.sql", "차단", DESIGNER],
+    ["designer", "scripts/check-migrations.ts", "차단", DESIGNER],
+  ];
+
+  it.each(rows)("%s · Edit %s → %s", (role, path, verdict, reason) => {
+    const result = runHook("guard-files.mjs", {
+      tool_name: "Edit",
+      cwd: repo,
+      ...roleInput(role),
+      tool_input: { file_path: join(repo, path) },
+    });
+    expectVerdict(result, verdict, reason);
+  });
+
+  it.each([
+    ["Write", { file_path: "docs/new.md" }],
+    ["MultiEdit", { file_path: "docs/prd.md" }],
+    ["NotebookEdit", { notebook_path: "docs/a.ipynb" }],
+  ])("developer · %s도 같은 규칙(상대 경로 포함)으로 차단", (tool, toolInput) => {
+    const result = runHook("guard-files.mjs", {
+      tool_name: tool,
+      cwd: repo,
+      agent_type: "developer",
+      tool_input: toolInput,
+    });
+    expectVerdict(result, "차단", DOCS);
+  });
+
+  it("vocals 레포 밖의 경로에는 역할 규칙을 적용하지 않는다", () => {
+    const result = runHook("guard-files.mjs", {
+      tool_name: "Write",
+      cwd: repo,
+      agent_type: "qa",
+      tool_input: { file_path: join(outside, "docs/a.md") },
+    });
+    expectVerdict(result, "허용");
+  });
+
+  it("acceptance-guard.ts의 PROTECTED_PATHS를 모두 developer에게 막는다", () => {
+    for (const area of PROTECTED_PATHS) {
+      const path = area.endsWith("/") ? `${area}x.test.ts` : area;
+      const result = runHook("guard-files.mjs", {
+        tool_name: "Edit",
+        cwd: repo,
+        agent_type: "developer",
+        tool_input: { file_path: join(repo, path) },
+      });
+      expectVerdict(result, "차단", ACCEPT);
+    }
+  });
+
+  it("acceptance-guard.ts가 없으면 같은 내용의 내장 목록으로 막는다", () => {
+    const original = join(repo, "scripts/acceptance-guard.ts");
+    renameSync(original, `${original}.bak`);
+    try {
+      for (const area of PROTECTED_PATHS) {
+        const path = area.endsWith("/") ? `${area}x.test.ts` : area;
+        const result = runHook("guard-files.mjs", {
+          tool_name: "Edit",
+          cwd: repo,
+          agent_type: "developer",
+          tool_input: { file_path: join(repo, path) },
+        });
+        expectVerdict(result, "차단", ACCEPT);
+      }
+    } finally {
+      renameSync(`${original}.bak`, original);
+    }
+  });
+
+  it("입력 JSON이 깨졌으면 막지 않는다", () => {
+    expectVerdict(runHook("guard-files.mjs", "{not json"), "허용");
+  });
+});
+
+type BashRow = [
+  role: string | undefined,
+  command: string,
+  verdict: "차단" | "허용",
+  reason?: string,
+];
+
+describe("guard-bash: 명령 규칙과 Bash 파일 쓰기 (이슈 #17)", () => {
+  const rows: BashRow[] = [
+    // 모든 세션: 되돌리기 어려운 명령
+    [undefined, "git push --force origin feat/x", "차단", "강제 push"],
+    [undefined, "git push -f origin feat/x", "차단", "강제 push"],
+    [undefined, "git push --force-with-lease origin feat/x", "허용"],
+    [undefined, "git push origin main", "차단", "main에 직접 push"],
+    [undefined, "git push origin HEAD:main", "차단", "main에 직접 push"],
+    [undefined, "git push -u origin chore/harness-2-hooks", "허용"],
+    [undefined, "supabase db reset --linked", "차단", "원격"],
+    [undefined, "supabase db reset", "허용"],
+    [undefined, `echo x > ${OLD_MIGRATION}`, "차단", MIGRATION],
+    [undefined, "rm -rf supabase/migrations", "차단", MIGRATION],
+    [
+      undefined,
+      `git mv ${OLD_MIGRATION} supabase/migrations/20260102000000_init.sql`,
+      "차단",
+      MIGRATION,
+    ],
+    [undefined, "echo SECRET=1 >> .env", "차단", ENV],
+    [undefined, "echo x > docs/a.md", "허용"],
+    // developer: 읽기는 허용
+    ["developer", "cat docs/prd.md", "허용"],
+    ["developer", "grep -rn PAY docs/ | head", "허용"],
+    ["developer", "sed -n '1,20p' docs/prd.md", "허용"],
+    ["developer", "cp docs/prd.md /tmp/prd-copy.md", "허용"],
+    ["developer", "pnpm test > /tmp/out.txt 2>&1", "허용"],
+    ["developer", "echo x > /dev/null", "허용"],
+    ["developer", "git checkout main", "허용"],
+    ["developer", "git checkout -b feat/21-tickets", "허용"],
+    ["developer", `echo x > ${BRANCH_MIGRATION}`, "허용"],
+    ["developer", "echo 'export {}' > packages/shared/src/new.ts", "허용"],
+    // developer: docs/ 쓰기
+    ["developer", "echo x > docs/a.md", "차단", DOCS],
+    ["developer", "echo x >> docs/prd.md", "차단", DOCS],
+    ["developer", "cat <<'EOF' > docs/a.md\n내용\nEOF", "차단", DOCS],
+    ["developer", "echo x | tee -a docs/prd.md", "차단", DOCS],
+    ["developer", "sed -i 's/a/b/' docs/prd.md", "차단", DOCS],
+    ["developer", "sed -i.bak -e 's/a/b/' docs/prd.md", "차단", DOCS],
+    ["developer", "perl -pi -e 's/a/b/' docs/prd.md", "차단", DOCS],
+    ["developer", "cp /tmp/x.md docs/", "차단", DOCS],
+    ["developer", "mv docs/prd.md docs/old.md", "차단", DOCS],
+    ["developer", "rm -rf docs", "차단", DOCS],
+    ["developer", "rm docs/*.md", "차단", DOCS],
+    ["developer", "touch docs/new.md", "차단", DOCS],
+    ["developer", "git rm docs/prd.md", "차단", DOCS],
+    ["developer", "git mv docs/prd.md docs/b.md", "차단", DOCS],
+    ["developer", "git checkout -- docs/prd.md", "차단", DOCS],
+    ["developer", "git checkout origin/main docs/prd.md", "차단", DOCS],
+    ["developer", "git restore docs/prd.md", "차단", DOCS],
+    ["developer", "cd docs && echo x > a.md", "차단", DOCS],
+    ["developer", 'bash -c "echo x > docs/a.md"', "차단", DOCS],
+    ["developer", "find docs -name '*.bak' -delete", "차단", DOCS],
+    ["developer", `node -e "require('fs').writeFileSync('docs/a.md', 'x')"`, "차단", DOCS],
+    ["developer", `python3 -c "open('docs/a.md', 'w').write('x')"`, "차단", DOCS],
+    [
+      "developer",
+      `node -e "console.log(require('fs').readFileSync('docs/prd.md', 'utf8'))"`,
+      "허용",
+    ],
+    // developer: 인수 테스트·판정 헬퍼, 기존 마이그레이션
+    ["developer", "echo x > supabase/tests/acceptance/17-example.test.ts", "차단", ACCEPT],
+    ["developer", "rm supabase/tests/helpers/rls-matrix.ts", "차단", ACCEPT],
+    ["developer", "sed -i 's/a/b/' supabase/tests/helpers/db.ts", "차단", ACCEPT],
+    ["developer", "rm -rf supabase/tests", "차단", ACCEPT],
+    ["developer", "echo x > supabase/tests/helpers/seed-ids.ts", "허용"],
+    ["developer", "rm supabase/migrations/*.sql", "차단", MIGRATION],
+    // qa
+    ["qa", "sed -i 's/a/b/' packages/shared/src/rule.test.ts", "허용"],
+    ["qa", "echo x > supabase/tests/acceptance/21-new.test.ts", "허용"],
+    ["qa", "echo x > scripts/req-trace-baseline.txt", "허용"],
+    ["qa", "pnpm check:req-trace --update", "허용"],
+    ["qa", "echo x > packages/shared/src/rule.ts", "차단", QA_ONLY],
+    ["qa", "cd packages && sed -i 's/a/b/' shared/src/*.ts", "차단", QA_ONLY],
+    ["qa", "echo x > supabase/seed.sql", "차단", QA_ONLY],
+    ["qa", "rm -rf supabase", "차단", MIGRATION],
+    // planner
+    ["planner", "echo x > docs/decisions.md", "허용"],
+    ["planner", "echo x > packages/shared/src/a.ts", "차단", PLANNER],
+    ["planner", "mv docs/a.md scripts/a.md", "차단", PLANNER],
+    // designer
+    ["designer", "echo x > docs/design.md", "허용"],
+    ["designer", "echo x > apps/mobile/a.tsx", "차단", DESIGNER],
+    ["designer", "cp /tmp/tokens.ts packages/shared/src/tokens.ts", "차단", DESIGNER],
+    // Acceptance 트레일러: QA가 아닌 역할은 못 단다
+    ["developer", 'git commit -m "feat: x\n\nAcceptance: qa"', "차단", TRAILER],
+    [
+      "developer",
+      "git commit -m \"$(cat <<'EOF'\nfeat: x\n\nAcceptance: qa\nCo-Authored-By: a\nEOF\n)\"",
+      "차단",
+      TRAILER,
+    ],
+    ["developer", 'git commit -m "feat: x" -m "Acceptance: qa"', "차단", TRAILER],
+    ["developer", 'git commit --trailer "Acceptance: qa" -m "feat: x"', "차단", TRAILER],
+    ["developer", 'git commit --trailer=Acceptance=qa -m "feat: x"', "차단", TRAILER],
+    ["developer", "git commit -F msg.txt", "차단", TRAILER],
+    ["developer", "printf 'feat: x\\n\\nAcceptance: qa\\n' | git commit -F -", "차단", TRAILER],
+    ["developer", "git commit -C HEAD", "차단", TRAILER],
+    ["developer", "git commit --amend --no-edit", "차단", TRAILER],
+    ["developer", 'git commit --amend -m "fix: 새 메시지"', "허용"],
+    ["developer", 'git commit -m "feat: x\n\nCo-Authored-By: a"', "허용"],
+    ["developer", 'git commit -m "docs: Acceptance: qa 트레일러 설명"', "허용"],
+    ["designer", 'git commit -m "feat: x\n\nAcceptance: qa"', "차단", TRAILER],
+    ["planner", 'git commit -m "docs: x\n\nAcceptance: qa"', "차단", TRAILER],
+    ["qa", 'git commit -m "test: x\n\nAcceptance: qa"', "허용"],
+    [undefined, 'git commit -m "test: x\n\nAcceptance: qa"', "허용"],
+  ];
+
+  it.each(rows)("%s · %s → %s", (role, command, verdict, reason) => {
+    const result = runHook("guard-bash.mjs", {
+      tool_name: "Bash",
+      cwd: repo,
+      ...roleInput(role),
+      tool_input: { command },
+    });
+    expectVerdict(result, verdict, reason);
+  });
+});
+
+describe("guard-mcp: 위험한 Supabase MCP 도구 (이슈 #17)", () => {
+  const dangerous = [
+    "create_project",
+    "pause_project",
+    "restore_project",
+    "create_branch",
+    "delete_branch",
+    "merge_branch",
+    "reset_branch",
+    "rebase_branch",
+    "apply_migration",
+    "execute_sql",
+    "deploy_edge_function",
+    "create_edge_function_secret",
+    "confirm_cost",
+  ];
+  const prefixes = [
+    "mcp__Supabase__",
+    "mcp__claude_ai_Supabase__",
+    "mcp__plugin_supabase_supabase__",
+  ];
+  const matcher = (() => {
+    const config = JSON.parse(readFileSync(join(HOOKS, "hooks.json"), "utf8"));
+    const entry = config.hooks.PreToolUse.find((e: { hooks: { command: string }[] }) =>
+      e.hooks.some((h) => h.command.includes("guard-mcp.mjs")),
+    );
+    return new RegExp(entry.matcher);
+  })();
+
+  it.each(prefixes.flatMap((prefix) => dangerous.map((tool) => [`${prefix}${tool}`])))(
+    "%s → 차단 (matcher도 걸린다)",
+    (toolName) => {
+      expect(matcher.test(toolName)).toBe(true);
+      for (const role of [undefined, "developer", "qa"]) {
+        const result = runHook("guard-mcp.mjs", {
+          tool_name: toolName,
+          ...roleInput(role),
+          tool_input: { project_id: "p" },
+        });
+        expectVerdict(result, "차단", "Supabase");
+      }
+    },
+  );
+
+  it.each([
+    ["mcp__0f3a9c__create_project", { name: "x", organization_id: "o", region: "ap" }],
+    ["mcp__0f3a9c__merge_branch", { branch_id: "b" }],
+    ["mcp__0f3a9c__execute_sql", { query: "select 1" }],
+  ])("서버 이름을 몰라도 Supabase 모양이면 차단: %s", (toolName, toolInput) => {
+    expectVerdict(runHook("guard-mcp.mjs", { tool_name: toolName, tool_input: toolInput }), "차단");
+  });
+
+  it.each([
+    ["mcp__Figma__create_branch", { fileKey: "f", branchName: "b" }],
+    ["mcp__github__create_branch", { owner: "o", repo: "r", branch: "b" }],
+    ["mcp__github__merge_branch", { owner: "o", repo: "r", base: "main" }],
+  ])("다른 커넥터의 같은 이름은 허용: %s", (toolName, toolInput) => {
+    expectVerdict(runHook("guard-mcp.mjs", { tool_name: toolName, tool_input: toolInput }), "허용");
+  });
+
+  it.each([
+    "mcp__Supabase__list_tables",
+    "mcp__Supabase__list_migrations",
+    "mcp__Supabase__get_project",
+    "mcp__Supabase__generate_typescript_types",
+    "mcp__Supabase__search_docs",
+  ])("읽기 도구는 matcher에 걸리지 않고 허용: %s", (toolName) => {
+    expect(matcher.test(toolName)).toBe(false);
+    expectVerdict(
+      runHook("guard-mcp.mjs", { tool_name: toolName, tool_input: { project_id: "p" } }),
+      "허용",
+    );
+  });
+});
+
+describe("hooks.json (이슈 #17)", () => {
+  const config = JSON.parse(readFileSync(join(HOOKS, "hooks.json"), "utf8"));
+
+  it("명령이 가리키는 스크립트가 플러그인 안에 있다", () => {
+    for (const entry of config.hooks.PreToolUse) {
+      for (const hook of entry.hooks) {
+        const script = /\$\{CLAUDE_PLUGIN_ROOT\}\/(\S+?\.mjs)/.exec(hook.command)?.[1];
+        expect(script).toBeTruthy();
+        expect(() => readFileSync(join(PLUGIN, script as string))).not.toThrow();
+      }
+    }
+  });
+
+  it("파일 쓰기 도구와 Bash에 훅이 걸린다", () => {
+    const matchers: string[] = config.hooks.PreToolUse.map((e: { matcher: string }) => e.matcher);
+    const covered = (tool: string) =>
+      matchers.some((m) =>
+        /^[\w|]+$/.test(m) ? m.split("|").includes(tool) : new RegExp(m).test(tool),
+      );
+    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]) {
+      expect(covered(tool)).toBe(true);
+    }
+  });
+});
