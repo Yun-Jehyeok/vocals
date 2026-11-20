@@ -1,0 +1,44 @@
+name: Harness guard
+
+# 이슈 #17 하네스 2단계. ci.yml의 "Harness change label"은 PR 자신의 워크플로·스크립트로 돌아서,
+# PR이 그 단계나 스크립트를 지우면 함께 사라진다. 이 워크플로는 pull_request_target이라 기준 브랜치(main)에
+# 있는 정의와 스크립트로 돈다. PR의 코드는 실행하지 않고 git 객체로만 받아 diff를 본다.
+# main에 merge된 뒤부터 돈다. 막는 검사로 쓰려면 브랜치 보호의 필수 검사에 넣는다(PM 설정).
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  harness-change:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Fetch PR head (실행하지 않음)
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+
+      - name: Harness change label
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: >-
+          node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/check-harness-change.ts
+          --base "$BASE_SHA" --head refs/remotes/pr/head --labels "$PR_LABELS" --strict

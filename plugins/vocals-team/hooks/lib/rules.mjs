@@ -8,7 +8,7 @@
 //   designer   코드 경로(apps/, packages/, supabase/, scripts/) 수정 금지
 // 규칙은 vocals 레포(루트에 plugins/vocals-team이 있는 git 저장소, worktree 포함) 안의 경로에만 적용한다.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 
 export const ROLES = /** @type {const} */ (["developer", "qa", "planner", "designer"]);
@@ -20,8 +20,8 @@ export const ROLES = /** @type {const} */ (["developer", "qa", "planner", "desig
  * @returns {"developer" | "qa" | "planner" | "designer" | null}
  */
 export function roleOf(agentType) {
-  const match = /(?:^|:)(developer|qa|planner|designer)$/.exec(String(agentType ?? ""));
-  return /** @type {any} */ (match?.[1] ?? null);
+  const match = /(?:^|:)(developer|qa|planner|designer)$/i.exec(String(agentType ?? "").trim());
+  return /** @type {any} */ (match?.[1]?.toLowerCase() ?? null);
 }
 
 /** scripts/acceptance-guard.ts를 못 읽을 때 쓰는 사본. 단위 테스트가 원본과 같은지 확인한다. */
@@ -35,7 +35,26 @@ export const FALLBACK_PROTECTED_PATHS = [
 
 export const MIGRATIONS_DIR = "supabase/migrations/";
 const PLUGIN_MARKER = join("plugins", "vocals-team", ".claude-plugin", "plugin.json");
-const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/i;
+
+/**
+ * 심볼릭 링크를 푼 실제 경로. 파일이 아직 없으면 가장 가까운 있는 조상을 풀고 나머지를 붙인다.
+ * 링크로 보호 경로를 다른 이름으로 여는 우회를 막는다.
+ */
+export function realPath(abs) {
+  const rest = [];
+  let dir = abs;
+  for (;;) {
+    try {
+      return join(realpathSync(dir), ...rest);
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return abs;
+      rest.unshift(basename(dir));
+      dir = parent;
+    }
+  }
+}
 
 /** @typedef {{ summary: string, why: string, instead: string }} Violation */
 /** @typedef {"write" | "tree"} Kind */
@@ -106,7 +125,7 @@ export function findRepoRoot(path) {
 }
 
 /** 저장소마다 한 번만 계산하는 정보 */
-class RepoInfo {
+export class RepoInfo {
   constructor(root) {
     this.root = root;
     this.isVocals = existsSync(join(root, PLUGIN_MARKER));
@@ -125,7 +144,7 @@ class RepoInfo {
       const body = /PROTECTED_PATHS\s*=\s*\[([\s\S]*?)\]/.exec(source)?.[1];
       if (body) {
         const found = [...body.matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1] ?? "");
-        if (found.length > 0) paths = found;
+        if (found.length > 0) paths = found.map((p) => p.toLowerCase());
       }
     } catch {
       // 파일이 없으면 사본을 쓴다
@@ -148,7 +167,7 @@ class RepoInfo {
     const files = new Set();
     for (const ref of refs) {
       const out = tryGit(this.root, ["ls-tree", "-r", "--name-only", ref, "--", MIGRATIONS_DIR]);
-      for (const file of out?.split("\n") ?? []) if (file) files.add(file);
+      for (const file of out?.split("\n") ?? []) if (file) files.add(file.toLowerCase());
     }
     this._migrations = [...files];
     return this._migrations;
@@ -156,7 +175,8 @@ class RepoInfo {
 }
 
 /**
- * file(저장소 기준 상대 경로)이 area 안인가. area가 "/"로 끝나면 디렉터리, 아니면 파일 하나.
+ * file(저장소 기준 상대 경로, 소문자)이 area 안인가. 대소문자를 구분하지 않는 파일 시스템(macOS) 우회를 막으려고
+ * 경로는 모두 소문자로 비교한다. area가 "/"로 끝나면 디렉터리, 아니면 파일 하나.
  * kind가 tree면(rm -r 등) file이 area의 조상이어도 area를 건드리는 것으로 본다.
  */
 export function touches(file, area, kind) {
@@ -173,10 +193,26 @@ const ALLOWED = {
     file === "scripts/req-trace-baseline.txt",
   planner: (file) =>
     touches(file, "docs/", "write") ||
-    file === "CLAUDE.md" ||
+    file === "claude.md" ||
     touches(file, ".claude/rules/", "write") ||
     (file.startsWith("plugins/vocals-team/") && file.endsWith(".md")),
 };
+
+/**
+ * 명령 문자열에 보호 경로(docs/, 인수 테스트·판정 헬퍼, 마이그레이션 디렉터리)가 나오는가.
+ * 개발 역할에서 훅이 풀 수 없는 쓰기와 함께 나오면 막는 데 쓴다. "docs:" 같은 커밋 종류는 경로로 보지 않는다.
+ * @param {string} command
+ * @param {string[]} protectedPaths
+ */
+export function mentionsProtected(command, protectedPaths) {
+  const text = command.toLowerCase();
+  if (/(^|[^\w.:-])docs([^\w.:-]|$)/.test(text)) return "docs/";
+  for (const area of [...protectedPaths, MIGRATIONS_DIR]) {
+    const needle = area.replace(/\/$/, "").toLowerCase();
+    if (text.includes(needle)) return area;
+  }
+  return null;
+}
 
 export class PathRules {
   /** @param {{ role: ReturnType<typeof roleOf> }} options */
@@ -202,17 +238,25 @@ export class PathRules {
    * @returns {(Violation & { file: string }) | null}
    */
   check(abs, kind) {
-    const name = basename(abs);
-    if (/^\.env(\..+)?$/.test(name) && name !== ".env.example")
-      return { ...MESSAGES.env, file: abs };
+    const real = realPath(abs);
+    for (const path of new Set([abs, real])) {
+      const name = basename(path).toLowerCase();
+      if (/^\.env(\..+)?$/.test(name) && name !== ".env.example") {
+        return { ...MESSAGES.env, file: abs };
+      }
+    }
 
-    const root = findRepoRoot(abs);
+    const root = findRepoRoot(real);
     if (!root) return null;
     const repo = this.repo(root);
     if (!repo.isVocals) return null;
-    const file = relative(root, abs).split(sep).join("/");
-    if (file.startsWith("../")) return null;
-    const hit = (violation) => ({ ...violation, file: file || "." });
+    const shown = relative(root, real).split(sep).join("/");
+    if (shown.startsWith("../")) return null;
+    const file = shown.toLowerCase();
+    const hit = (violation) => ({
+      ...violation,
+      file: (shown || ".") + (real !== abs ? ` (링크: ${abs})` : ""),
+    });
 
     if (repo.baseMigrations.some((migration) => touches(file, migration, kind))) {
       return hit(MESSAGES.migration);

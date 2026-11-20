@@ -18,10 +18,22 @@ const SUPABASE_ONLY = [
   "create_edge_function_secret",
   "confirm_cost",
 ];
-const SHARED_NAMES = ["create_project", "create_branch", "delete_branch", "merge_branch"];
+const SHARED_NAMES = [
+  "create_project",
+  "create_branch",
+  "delete_branch",
+  "merge_branch",
+  // 노트북: run_notebook은 원격 DB에 SQL을 실행하고(확인 후 쓰기도 됨), create는 프로젝트 공유 상태에 SQL을 저장하고,
+  // delete는 되돌릴 수 없다. get_notebook·list_notebooks는 읽기라 허용한다.
+  "run_notebook",
+  "create_notebook",
+  "delete_notebook",
+];
 const SUPABASE_KEYS = ["project_id", "organization_id", "branch_id", "confirm_cost_id"];
 
 const INSTEAD = {
+  run_notebook:
+    "조회는 로컬 DB(`pnpm db:query`)로 하세요. 원격 조회가 꼭 필요하면 `[질문] 받는 역할: PM`으로 보고하세요.",
   execute_sql:
     "조회는 `list_tables`·`list_migrations` 같은 읽기 도구나 로컬 DB(`pnpm db:query`)로 하세요. 데이터·스키마 변경은 마이그레이션 파일과 seed로 합니다.",
   apply_migration:

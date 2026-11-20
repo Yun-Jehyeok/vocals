@@ -1,19 +1,22 @@
 // Bash 명령에서 "파일을 쓰거나 지우는 대상"과 git commit 호출을 뽑는다. 이슈 #17 하네스 2단계.
 //
 // 완벽한 셸 해석기가 아니다. 에이전트가 흔히 쓰는 경로만 본다:
-//   리다이렉트(>, >>, &>), tee, sed -i, perl -i, cp/mv/install/ln, rm/rmdir/unlink/shred, touch, truncate,
-//   dd of=, git mv/rm/checkout/restore, find -delete/-exec, bash -c/eval 안의 명령,
-//   node -e·python -c 같은 한 줄 코드 안의 파일 쓰기 API와 경로 문자열.
-// 못 보는 것: xargs, 스크립트 파일 실행, git apply/patch, 변수로 만든 경로 등. 최종 보증은 CI다.
-import { existsSync, readdirSync, statSync } from "node:fs";
+//   리다이렉트(>, >>, &>), tee, sed -i, perl -i, awk -i inplace, ex/vi/ed, cp/mv/install/ln/rsync,
+//   rm/rmdir/unlink/shred, touch, truncate, dd of=, tar -x, unzip, patch·git apply(패치 파일을 읽음),
+//   git mv/rm/checkout <커밋>/restore --source, find -delete/-exec, bash -c/eval 안의 명령,
+//   node -e·python -c 같은 한 줄 코드 안의 파일 쓰기 API와 경로 문자열, {a,b}와 glob.
+// 무엇을 쓰는지 풀 수 없는 것(스크립트 실행, xargs, pnpm/npx, 변수 경로, 동적 cd)은 opaque로 모은다.
+// guard-bash는 개발 역할에서 opaque와 보호 경로 문자열이 함께 나오면 보수적으로 막는다. 최종 보증은 CI다.
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /**
  * @typedef {{ words: string[], redirects: { op: string, target: string }[], heredocs: string[] }} Segment
  * @typedef {{ path: string, kind: "write" | "tree", via: string }} Target
  *   kind: write = 그 경로 하나를 쓴다, tree = 그 경로와 아래 전체를 바꾸거나 지운다
- * @typedef {{ cwd: string, args: string[], heredocs: string[], raw: string }} CommitCall
+ * @typedef {{ cwd: string, sub: string, args: string[], heredocs: string[], raw: string, config: string[], env: string[] }} CommitCall
+ * @typedef {{ cwd: string, args: string[] }} PushCall
  */
 
 const newSegment = () => /** @type {Segment} */ ({ words: [], redirects: [], heredocs: [] });
@@ -269,13 +272,39 @@ function positional(args, valueFlags = []) {
   return out;
 }
 
-/** 파일 경로처럼 보이지 않는 값(빈 값, 변수, 장치 파일)은 건너뛴다. */
-function resolvable(p) {
-  return Boolean(p) && !p.startsWith("$") && !p.startsWith("/dev/") && !p.startsWith("/proc/");
+/** 경로로 볼 수 없는 값(빈 값, 장치 파일) */
+function ignorable(p) {
+  return !p || p.startsWith("/dev/") || p.startsWith("/proc/");
 }
 
-/** ~와 상대 경로를 풀고, 간단한 glob(*, ?, [..])은 실제 파일로 펼친다. 펼칠 것이 없으면 그대로 둔다. */
+/** 변수·명령 치환이 들어 있어 훅이 풀 수 없는 경로 */
+function dynamic(p) {
+  return p.includes("$") || p.includes("`");
+}
+
+/** {a,b} 중괄호 확장(한 단계씩, 최대 64개) */
+function expandBraces(p) {
+  const out = [];
+  const queue = [p];
+  while (queue.length > 0 && out.length < 64) {
+    const item = queue.shift() ?? "";
+    const m = /\{([^{}]*,[^{}]*)\}/.exec(item);
+    if (!m) out.push(item);
+    else {
+      for (const part of (m[1] ?? "").split(",")) {
+        queue.push(item.slice(0, m.index) + part + item.slice(m.index + m[0].length));
+      }
+    }
+  }
+  return out;
+}
+
+/** ~와 상대 경로를 풀고, {a,b}와 간단한 glob(*, ?, [..])은 펼친다. glob이 아무것도 못 찾으면 그대로 둔다. */
 function expandPath(cwd, p) {
+  return expandBraces(p).flatMap((one) => expandGlob(cwd, one));
+}
+
+function expandGlob(cwd, p) {
   const withHome = p === "~" ? homedir() : p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
   const abs = isAbsolute(withHome) ? resolve(withHome) : resolve(cwd, withHome);
   if (!/[*?[]/.test(abs)) return [abs];
@@ -333,26 +362,99 @@ function inlineCodeTargets(code) {
   return out;
 }
 
+/** patch 파일이 바꾸는 경로(a/·b/ 접두어를 뗀 상대 경로). 읽지 못하면 null */
+function patchTargets(file) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  const out = new Set();
+  for (const m of text.matchAll(/^(?:diff --git a\/(\S+) b\/(\S+)|(?:---|\+\+\+) (\S+))/gm)) {
+    for (const p of [m[1], m[2], m[3]]) {
+      if (p && p !== "/dev/null") out.add(p.replace(/^[ab]\//, ""));
+    }
+  }
+  return [...out];
+}
+
+/** xargs 뒤에 와도 파일을 쓰지 않는 명령 */
+const READ_ONLY = new Set([
+  "cat",
+  "wc",
+  "grep",
+  "egrep",
+  "fgrep",
+  "rg",
+  "head",
+  "tail",
+  "ls",
+  "echo",
+  "printf",
+  "stat",
+  "file",
+  "du",
+  "basename",
+  "dirname",
+  "realpath",
+  "readlink",
+  "sha256sum",
+  "sha1sum",
+  "md5sum",
+  "diff",
+  "cmp",
+  "jq",
+  "sort",
+  "uniq",
+  "test",
+  "true",
+]);
+/** 다른 프로그램·스크립트를 실행해 무엇을 쓰는지 알 수 없는 명령 */
+const RUNNERS = new Set([
+  "npx",
+  "pnpm",
+  "npm",
+  "yarn",
+  "bunx",
+  "tsx",
+  "ts-node",
+  "make",
+  "just",
+  "source",
+  ".",
+]);
+
 /**
  * Bash 명령을 분석한다.
  * @param {string} command
  * @param {string} cwd 명령을 실행하는 디렉터리
- * @returns {{ targets: Target[], commits: CommitCall[] }}
+ * @returns {{ targets: Target[], commits: CommitCall[], pushes: PushCall[], opaque: string[] }}
+ *   opaque: 무엇을 쓰는지 훅이 풀 수 없는 쓰기(스크립트 실행, xargs, 변수 경로 등)
  */
 export function analyzeCommand(command, cwd, depth = 0) {
   /** @type {Target[]} */
   const targets = [];
   /** @type {CommitCall[]} */
   const commits = [];
+  /** @type {PushCall[]} */
+  const pushes = [];
+  /** @type {string[]} */
+  const opaque = [];
   let dir = cwd;
+  let dirKnown = true;
 
   /** @param {string} p @param {"write" | "tree"} kind @param {string} via @param {string} [base] */
   const add = (p, kind, via, base = dir) => {
-    if (!resolvable(p)) return;
+    if (ignorable(p)) return;
+    if (dynamic(p) || (!dirKnown && base === dir && !isAbsolute(p) && !p.startsWith("~"))) {
+      opaque.push(`${via} ${p}`);
+      return;
+    }
     for (const path of expandPath(base, p)) targets.push({ path, kind, via });
   };
 
-  /** cp·mv·install·ln: 대상 경로(디렉터리면 그 아래 원본 이름). mv는 원본도 지운다. */
+  /** cp·mv·install·ln·rsync: 대상 경로(디렉터리면 그 아래 원본 이름). mv는 원본도, ln은 링크가 가리키는 곳도 본다. */
   const copyLike = (name, args, base = dir) => {
     if (name === "install" && args.includes("-d")) return;
     let targetDir = null;
@@ -365,9 +467,13 @@ export function analyzeCommand(command, cwd, depth = 0) {
       else if (a === "-t" || a === "--target-directory") targetDir = args[++i] ?? null;
       else if (a.startsWith("--target-directory="))
         targetDir = a.slice("--target-directory=".length);
-      else if (["-S", "--suffix", "-m", "--mode", "-o", "--owner", "-g", "--group"].includes(a))
+      else if (
+        ["-S", "--suffix", "-m", "--mode", "-o", "--owner", "-g", "--group"].includes(a) ||
+        (name === "rsync" &&
+          ["-e", "--rsh", "--exclude", "--include", "--filter", "-f"].includes(a))
+      ) {
         i++;
-      else if (!a.startsWith("-")) rest.push(a);
+      } else if (!a.startsWith("-")) rest.push(a);
     }
     const sources = targetDir ? rest : rest.slice(0, -1);
     const dest = targetDir ?? rest.at(-1);
@@ -376,10 +482,16 @@ export function analyzeCommand(command, cwd, depth = 0) {
       Boolean(targetDir) ||
       dest.endsWith("/") ||
       sources.length > 1 ||
-      (resolvable(dest) && isDirectory(resolve(base, dest)));
+      (!dynamic(dest) && isDirectory(resolve(base, dest)));
     for (const source of sources) {
-      add(destIsDir ? join(dest, basename(source)) : dest, "tree", name, base);
+      const into = name === "rsync" ? dest : destIsDir ? join(dest, basename(source)) : dest;
+      add(into, "tree", name, base);
       if (name === "mv") add(source, "tree", name, base);
+      if (name === "ln") {
+        // 링크로 보호 경로를 다른 이름으로 열지 못하게 링크 원본도 검사한다
+        add(source, "tree", "ln 원본", base);
+        if (!isAbsolute(source)) add(source, "tree", "ln 원본", resolve(base, dirname(dest)));
+      }
     }
   };
 
@@ -389,16 +501,37 @@ export function analyzeCommand(command, cwd, depth = 0) {
       if (redirect.op === ">&" && /^(\d+|-)$/.test(redirect.target)) continue;
       add(redirect.target, "write", `리다이렉트 ${redirect.op}`);
     }
+    const inputFile = seg.redirects.find((r) => r.op === "<")?.target;
 
+    const prefix = [];
+    for (const w of seg.words) {
+      if (!ASSIGNMENT.test(w)) break;
+      prefix.push(w);
+    }
     const words = stripPrefix(seg.words);
-    const name = basename(words[0] ?? "");
+    const rawName = words[0] ?? "";
+    const name = basename(rawName);
     const args = words.slice(1);
+
+    if (/^(\.{1,2}\/|~)/.test(rawName)) {
+      opaque.push(rawName); // ./script.sh 같은 실행 파일
+      continue;
+    }
     switch (name) {
       case "cd":
       case "pushd": {
         const to = args.find((a) => !a.startsWith("-"));
-        if (!to) dir = homedir();
-        else if (resolvable(to)) dir = expandPath(dir, to)[0] ?? dir;
+        if (!to) {
+          dir = homedir();
+          dirKnown = true;
+        } else if (to === "-") dirKnown = false;
+        else if (dynamic(to)) {
+          dirKnown = false;
+          opaque.push(`cd ${to}`);
+        } else if (dirKnown || isAbsolute(to)) {
+          dir = expandPath(dir, to)[0] ?? dir;
+          dirKnown = true;
+        }
         break;
       }
       case "rm":
@@ -423,6 +556,7 @@ export function analyzeCommand(command, cwd, depth = 0) {
       case "mv":
       case "install":
       case "ln":
+      case "rsync":
         copyLike(name, args);
         break;
       case "dd":
@@ -439,6 +573,85 @@ export function analyzeCommand(command, cwd, depth = 0) {
         for (const p of hasScriptFlag ? files : files.slice(1)) add(p, "write", "sed -i");
         break;
       }
+      case "awk":
+      case "gawk": {
+        const index = args.indexOf("-i");
+        if (index === -1 || !/inplace/.test(args[index + 1] ?? "")) break;
+        const files = positional(args, ["-i", "-f", "-v", "-F", "-e", "--include", "--file"]);
+        const hasProgramFlag = args.some((a) => a === "-f" || a === "-e" || a === "--file");
+        for (const p of hasProgramFlag ? files : files.slice(1)) add(p, "write", "awk -i inplace");
+        break;
+      }
+      case "ex":
+      case "vi":
+      case "vim":
+      case "nvim":
+      case "ed":
+        for (const p of positional(args, ["-c", "-S", "-u", "-i", "--cmd", "-s", "-p"])) {
+          if (!p.startsWith("+")) add(p, "write", name);
+        }
+        break;
+      case "patch": {
+        const pos = positional(args, [
+          "-i",
+          "--input",
+          "-p",
+          "-d",
+          "--directory",
+          "-o",
+          "-r",
+          "-B",
+          "-D",
+        ]);
+        const patchFile =
+          args[args.indexOf("-i") + 1] && args.includes("-i")
+            ? args[args.indexOf("-i") + 1]
+            : inputFile;
+        if (pos[0]) add(pos[0], "write", "patch");
+        else if (patchFile && !dynamic(patchFile)) {
+          const paths = patchTargets(resolve(dir, patchFile));
+          if (paths) for (const p of paths) add(p, "write", "patch");
+          else opaque.push(`patch < ${patchFile}`);
+        } else opaque.push("patch");
+        break;
+      }
+      case "tar": {
+        const extract = args.some(
+          (a, i) =>
+            a === "--extract" ||
+            a === "--get" ||
+            (/^-?[a-zA-Z]*x/.test(a) && (i === 0 || a.startsWith("-"))),
+        );
+        if (!extract) break;
+        const index = args.findIndex((a) => a === "-C" || a === "--directory");
+        const inline = args.find((a) => a.startsWith("--directory="));
+        add(
+          index !== -1 ? (args[index + 1] ?? ".") : inline ? inline.slice(12) : ".",
+          "tree",
+          "tar -x",
+        );
+        break;
+      }
+      case "unzip": {
+        const index = args.indexOf("-d");
+        if (args.includes("-l") || args.includes("-t")) break;
+        add(index !== -1 ? (args[index + 1] ?? ".") : ".", "tree", "unzip");
+        break;
+      }
+      case "xargs": {
+        let i = 0;
+        while (i < args.length && (args[i] ?? "").startsWith("-")) {
+          i += ["-n", "-I", "-L", "-P", "-d", "-E", "-s", "-a"].includes(args[i] ?? "") ? 2 : 1;
+        }
+        const next = basename(args[i] ?? "");
+        const nextArgs = args.slice(i + 1);
+        const readsOnly =
+          READ_ONLY.has(next) ||
+          (next === "sed" && !nextArgs.some((a) => /^-[a-zA-Z]*i/.test(a))) ||
+          next === "";
+        if (!readsOnly) opaque.push(`xargs ${next}`);
+        break;
+      }
       case "perl": {
         const inPlace = args.some((a) => /^-[a-zA-Z]*i/.test(a));
         const files = [];
@@ -452,8 +665,9 @@ export function analyzeCommand(command, cwd, depth = 0) {
           } else if (!a.startsWith("-")) files.push(a);
         }
         if (inPlace) for (const p of hasCode ? files : files.slice(1)) add(p, "write", "perl -i");
-        else
+        else if (hasCode)
           for (const code of codes) for (const p of inlineCodeTargets(code)) add(p, "write", name);
+        else if (files.length > 0) opaque.push(`perl ${files[0]}`);
         break;
       }
       case "node":
@@ -463,11 +677,15 @@ export function analyzeCommand(command, cwd, depth = 0) {
       case "python3":
       case "ruby": {
         const codeFlags = ["-e", "--eval", "-p", "--print", "-c"];
+        let hasCode = false;
         for (let i = 0; i < args.length; i++) {
           if (codeFlags.includes(args[i] ?? "")) {
+            hasCode = true;
             for (const p of inlineCodeTargets(args[i + 1] ?? "")) add(p, "write", name);
           }
         }
+        if (!hasCode && args.some((a) => !a.startsWith("-"))) opaque.push(`${name} 스크립트`);
+        else if (args.includes("-m")) opaque.push(`${name} -m`);
         break;
       }
       case "find": {
@@ -495,6 +713,10 @@ export function analyzeCommand(command, cwd, depth = 0) {
           const inner = analyzeCommand(args[index + 1] ?? "", dir, depth + 1);
           targets.push(...inner.targets);
           commits.push(...inner.commits);
+          pushes.push(...inner.pushes);
+          opaque.push(...inner.opaque);
+        } else if (index === -1 && args.some((a) => !a.startsWith("-"))) {
+          opaque.push(`${name} 스크립트`);
         }
         break;
       }
@@ -503,17 +725,23 @@ export function analyzeCommand(command, cwd, depth = 0) {
           const inner = analyzeCommand(args.join(" "), dir, depth + 1);
           targets.push(...inner.targets);
           commits.push(...inner.commits);
+          pushes.push(...inner.pushes);
+          opaque.push(...inner.opaque);
         }
         break;
       case "git": {
         let gitDir = dir;
+        const config = [];
         let i = 0;
         while (i < args.length && (args[i] ?? "").startsWith("-")) {
           const a = args[i] ?? "";
           if (a === "-C") {
             gitDir = resolve(gitDir, args[i + 1] ?? ".");
             i += 2;
-          } else if (["-c", "--git-dir", "--work-tree", "--namespace"].includes(a)) i += 2;
+          } else if (a === "-c") {
+            config.push(args[i + 1] ?? "");
+            i += 2;
+          } else if (["--git-dir", "--work-tree", "--namespace"].includes(a)) i += 2;
           else i++;
         }
         const sub = args[i];
@@ -522,42 +750,70 @@ export function analyzeCommand(command, cwd, depth = 0) {
         else if (sub === "rm") {
           for (const p of positional(subArgs)) add(p, "tree", "git rm", gitDir);
         } else if (sub === "restore") {
-          for (const p of positional(subArgs, ["-s", "--source"]))
-            add(p, "tree", "git restore", gitDir);
+          // --source 없이 HEAD·index로 되돌리는 것은 커밋된 내용으로 돌아갈 뿐이라 막지 않는다
+          const hasSource = subArgs.some(
+            (a) => a === "-s" || a === "--source" || a.startsWith("--source="),
+          );
+          if (hasSource) {
+            for (const p of positional(subArgs, ["-s", "--source"]))
+              add(p, "tree", "git restore --source", gitDir);
+          }
         } else if (sub === "checkout") {
           const dd = subArgs.indexOf("--");
-          let paths;
-          if (dd !== -1) paths = subArgs.slice(dd + 1);
-          else {
-            const pos = positional(subArgs, ["-b", "-B", "--orphan", "--conflict"]);
-            if (pos.length >= 2) paths = pos.slice(1);
-            else paths = pos.filter((p) => resolvable(p) && existsSync(resolve(gitDir, p)));
+          const pos = positional(dd === -1 ? subArgs : subArgs.slice(0, dd), [
+            "-b",
+            "-B",
+            "--orphan",
+            "--conflict",
+          ]);
+          let paths = [];
+          if (dd !== -1)
+            paths = pos.length > 0 ? subArgs.slice(dd + 1) : []; // `-- 경로`만 있으면 index로 되돌림
+          else if (pos.length >= 2) paths = pos.slice(1);
+          for (const p of paths) add(p, "tree", "git checkout <커밋>", gitDir);
+        } else if (sub === "apply" || sub === "am") {
+          if (subArgs.some((a) => ["--check", "--stat", "--numstat", "--summary"].includes(a)))
+            break;
+          const files = positional(subArgs, ["-p", "-C", "--directory", "--exclude", "--include"]);
+          if (files.length === 0) opaque.push(`git ${sub}`);
+          for (const file of files) {
+            const paths = dynamic(file) ? null : patchTargets(resolve(dir, file));
+            if (paths) for (const p of paths) add(p, "write", `git ${sub}`, gitDir);
+            else opaque.push(`git ${sub} ${file}`);
           }
-          for (const p of paths) add(p, "tree", "git checkout", gitDir);
-        } else if (sub === "commit") {
-          commits.push({ cwd: gitDir, args: subArgs, heredocs: seg.heredocs, raw: command });
+        } else if (sub === "commit" || sub === "commit-tree" || sub === "merge") {
+          commits.push({
+            cwd: gitDir,
+            sub,
+            args: subArgs,
+            heredocs: seg.heredocs,
+            raw: command,
+            config,
+            env: prefix,
+          });
+        } else if (sub === "push") {
+          pushes.push({ cwd: gitDir, args: subArgs });
         }
         break;
       }
       default:
+        if (RUNNERS.has(name)) opaque.push(name);
         break;
     }
   }
-  return { targets, commits };
+  return { targets, commits, pushes, opaque };
 }
 
 /** 줄 첫머리의 `Acceptance:` 트레일러 */
 export const TRAILER_LINE = /(^|\n)[ \t]*Acceptance[ \t]*:/i;
-/** --trailer 값 */
-export const TRAILER_OPTION = /^\s*Acceptance\s*[:=]/i;
 
 /**
  * git commit 인자에서 메시지 출처를 모은다.
  * @param {string[]} args
  */
 export function commitSources(args) {
-  /** @type {{ messages: string[], trailers: string[], files: string[], reuse: string[], amend: boolean }} */
-  const out = { messages: [], trailers: [], files: [], reuse: [], amend: false };
+  /** @type {{ messages: string[], trailers: string[], files: string[], reuse: string[], templates: string[], amend: boolean }} */
+  const out = { messages: [], trailers: [], files: [], reuse: [], templates: [], amend: false };
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? "";
     const value = () => args[++i] ?? "";
@@ -571,10 +827,35 @@ export function commitSources(args) {
     else if (a === "-F" || a === "--file") out.files.push(value());
     else if (a.startsWith("--file=")) out.files.push(a.slice("--file=".length));
     else if (/^-F./.test(a)) out.files.push(a.slice(2));
+    else if (a === "-t" || a === "--template") out.templates.push(value());
+    else if (a.startsWith("--template=")) out.templates.push(a.slice("--template=".length));
     else if (a === "-C" || a === "-c" || a === "--reuse-message" || a === "--reedit-message") {
       out.reuse.push(value());
     } else if (/^--re(use|edit)-message=/.test(a)) out.reuse.push(a.slice(a.indexOf("=") + 1));
     else if (a === "--amend") out.amend = true;
   }
   return out;
+}
+
+/**
+ * git push 인자에서 강제 push 여부와 대상 브랜치를 본다.
+ * @param {string[]} args
+ */
+export function pushInfo(args) {
+  const valueFlags = ["--repo", "-o", "--push-option", "--receive-pack", "--exec"];
+  let force = false;
+  let all = false;
+  for (const a of args) {
+    if (a === "--force" || a === "--mirror" || (/^-[a-zA-Z]+$/.test(a) && a.includes("f")))
+      force = true;
+    if (a === "--all" || a === "--mirror") all = true;
+  }
+  const refspecs = positional(args, valueFlags).slice(1);
+  if (refspecs.some((r) => r.startsWith("+"))) force = true;
+  const destinations = refspecs.map((r) => {
+    const spec = r.replace(/^\+/, "");
+    const dst = spec.includes(":") ? spec.slice(spec.indexOf(":") + 1) : spec;
+    return dst.replace(/^refs\/heads\//, "");
+  });
+  return { force, all, destinations, hasRefspec: refspecs.length > 0 };
 }

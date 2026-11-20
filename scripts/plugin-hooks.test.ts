@@ -2,7 +2,15 @@
 // 임시 git 저장소에 vocals 레포 모양을 만들고, 훅 스크립트에 입력 JSON을 넣어
 // 차단(종료 코드 2 + "왜/대신 할 일" 메시지)과 허용(종료 코드 0)을 표로 확인한다.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +27,7 @@ const QA_COMMIT = "test: 인수 테스트\n\nAcceptance: qa\nCo-Authored-By: tes
 
 let repo: string;
 let outside: string;
+let worktree: string;
 
 function git(...args: string[]) {
   return execFileSync(
@@ -81,6 +90,20 @@ beforeAll(() => {
   git("add", "-A");
   git("commit", "-q", "-m", QA_COMMIT);
   write("msg.txt", "feat: x\n\nAcceptance: qa\n");
+  write("clean-msg.txt", "feat: x\n\nCo-Authored-By: a <a@example.com>\n");
+  write("tmpl.txt", "feat: x\n");
+  write(
+    "fix.patch",
+    "diff --git a/docs/prd.md b/docs/prd.md\n--- a/docs/prd.md\n+++ b/docs/prd.md\n@@ -1 +1 @@\n-# PRD\n+# X\n",
+  );
+  write(
+    "src.patch",
+    "--- a/packages/shared/src/rule.ts\n+++ b/packages/shared/src/rule.ts\n@@ -0,0 +1 @@\n+x\n",
+  );
+  symlinkSync("docs", join(repo, "d"));
+  symlinkSync(join(repo, "docs"), join(outside, "docs-link"));
+  worktree = join(outside, "wt");
+  git("worktree", "add", "-q", worktree, "main");
 });
 
 afterAll(() => {
@@ -125,7 +148,7 @@ const ENV = ".env 파일";
 const QA_ONLY = "QA는 테스트 파일";
 const PLANNER = "기획은 docs/";
 const DESIGNER = "코드(apps/";
-const TRAILER = "`Acceptance:` 트레일러";
+const TRAILER = "트레일러는 QA만 답니다";
 
 type Row = [role: string | undefined, path: string, verdict: "차단" | "허용", reason?: string];
 
@@ -184,6 +207,18 @@ describe("guard-files: 파일 쓰기 도구의 역할별·전역 차단 (이슈 
     ["designer", "packages/shared/src/rule.ts", "차단", DESIGNER],
     ["designer", "supabase/seed.sql", "차단", DESIGNER],
     ["designer", "scripts/check-migrations.ts", "차단", DESIGNER],
+    // 대소문자: 대소문자를 구분하지 않는 파일 시스템(macOS) 우회와 agent_type 표기
+    ["developer", "Docs/prd.md", "차단", DOCS],
+    ["developer", "DOCS/new.md", "차단", DOCS],
+    ["developer", "Supabase/Tests/Acceptance/17-example.test.ts", "차단", ACCEPT],
+    [undefined, "supabase/migrations/20260101000000_INIT.sql", "차단", MIGRATION],
+    ["Developer", "docs/prd.md", "차단", DOCS],
+    ["vocals-team:Developer", "docs/prd.md", "차단", DOCS],
+    ["QA", "packages/shared/src/rule.ts", "차단", QA_ONLY],
+    ["qa", "packages/shared/src/Rule.Test.ts", "허용"],
+    // 심볼릭 링크: 레포 안 링크 d -> docs
+    ["developer", "d/prd.md", "차단", DOCS],
+    ["developer", "d/new.md", "차단", DOCS],
   ];
 
   it.each(rows)("%s · Edit %s → %s", (role, path, verdict, reason) => {
@@ -206,6 +241,26 @@ describe("guard-files: 파일 쓰기 도구의 역할별·전역 차단 (이슈 
       cwd: repo,
       agent_type: "developer",
       tool_input: toolInput,
+    });
+    expectVerdict(result, "차단", DOCS);
+  });
+
+  it("레포 밖에서 docs/를 가리키는 링크로 써도 막는다", () => {
+    const result = runHook("guard-files.mjs", {
+      tool_name: "Write",
+      cwd: repo,
+      agent_type: "developer",
+      tool_input: { file_path: join(outside, "docs-link", "prd.md") },
+    });
+    expectVerdict(result, "차단", DOCS);
+  });
+
+  it("worktree 안에서도 같은 규칙을 적용한다", () => {
+    const result = runHook("guard-files.mjs", {
+      tool_name: "Edit",
+      cwd: worktree,
+      agent_type: "developer",
+      tool_input: { file_path: join(worktree, "docs/prd.md") },
     });
     expectVerdict(result, "차단", DOCS);
   });
@@ -311,9 +366,17 @@ describe("guard-bash: 명령 규칙과 Bash 파일 쓰기 (이슈 #17)", () => {
     ["developer", "touch docs/new.md", "차단", DOCS],
     ["developer", "git rm docs/prd.md", "차단", DOCS],
     ["developer", "git mv docs/prd.md docs/b.md", "차단", DOCS],
-    ["developer", "git checkout -- docs/prd.md", "차단", DOCS],
     ["developer", "git checkout origin/main docs/prd.md", "차단", DOCS],
-    ["developer", "git restore docs/prd.md", "차단", DOCS],
+    ["developer", "git checkout HEAD~1 -- docs/prd.md", "차단", DOCS],
+    ["developer", "git restore --source=origin/main docs/prd.md", "차단", DOCS],
+    ["developer", "git restore -s HEAD~1 supabase/tests/acceptance/", "차단", ACCEPT],
+    // HEAD·index로 되돌리기는 커밋된 내용으로 돌아갈 뿐이라 허용(오탐 수정)
+    ["developer", "git checkout -- docs/prd.md", "허용"],
+    ["developer", "git restore docs/prd.md", "허용"],
+    ["developer", "git restore .", "허용"],
+    [undefined, "git restore .", "허용"],
+    [undefined, "git checkout -- docs/erd.md supabase/", "허용"],
+    [undefined, "git restore --staged supabase/migrations/", "허용"],
     ["developer", "cd docs && echo x > a.md", "차단", DOCS],
     ["developer", 'bash -c "echo x > docs/a.md"', "차단", DOCS],
     ["developer", "find docs -name '*.bak' -delete", "차단", DOCS],
@@ -365,12 +428,134 @@ describe("guard-bash: 명령 규칙과 Bash 파일 쓰기 (이슈 #17)", () => {
     ["developer", "git commit --amend --no-edit", "차단", TRAILER],
     ["developer", 'git commit --amend -m "fix: 새 메시지"', "허용"],
     ["developer", 'git commit -m "feat: x\n\nCo-Authored-By: a"', "허용"],
-    ["developer", 'git commit -m "docs: Acceptance: qa 트레일러 설명"', "허용"],
+    ["developer", 'git commit -m "docs: Acceptance: qa 트레일러 설명"', "차단", "`Acceptance:`"],
+    [
+      "developer",
+      "printf 'x\\n\\nAcceptance: qa\\n' > m && git commit -F m",
+      "차단",
+      "`Acceptance:`",
+    ],
+    ["developer", "grep -rn 'Acceptance:' scripts/", "차단", "`Acceptance:`"],
+    ["developer", `git commit -m "$(printf 'x')"`, "차단", "$(…)"],
+    ["developer", 'git commit -m "$(cat msg2.txt)"', "차단", "$(…)"],
+    ["developer", 'git commit -m "`cat msg2.txt`"', "차단", "백틱"],
+    ["developer", "git commit -t tmpl.txt", "차단", "--template"],
+    ["developer", "git commit --template=tmpl.txt", "차단", "--template"],
+    ["developer", "git -c core.editor=true commit", "차단", "편집기"],
+    ["developer", "GIT_EDITOR=true git commit", "차단", "편집기"],
+    ["developer", "EDITOR=/tmp/e.sh git commit", "차단", "편집기"],
+    ["developer", "git config core.editor /tmp/e.sh", "차단", "편집기"],
+    ["developer", "echo 'feat: x' > m2 && git commit -F m2", "차단", "아직 없는"],
+    ["developer", "git -c trailer.a.key=Acc commit --trailer a=qa -m x", "차단", "트레일러"],
+    ["developer", 'git commit --trailer "Reviewed-by: x" -m "feat: x"', "차단", "--trailer"],
+    ["developer", "git interpret-trailers --trailer a=qa < clean-msg.txt", "차단", "트레일러"],
+    ["developer", "git commit-tree HEAD^{tree} -F msg.txt", "차단", "메시지 파일"],
+    ["developer", "git commit -F clean-msg.txt", "허용"],
+    ["developer", 'git commit --trailer "Co-Authored-By: a <a@example.com>" -m "feat: x"', "허용"],
+    ["developer", "git commit -F - <<'EOF'\nfeat: x\n\nCo-Authored-By: a\nEOF", "허용"],
+    ["developer", 'git merge -m "merge: main" main', "허용"],
+    ["qa", "git commit -t tmpl.txt", "허용"],
+    // 강제 push 변형, main으로 가는 push
+    [undefined, "git push -fu origin feat/x", "차단", "강제 push"],
+    [undefined, "git push -uf origin feat/x", "차단", "강제 push"],
+    [undefined, "git push origin +HEAD:feat/x", "차단", "강제 push"],
+    [undefined, "git push origin +main", "차단", "push"],
+    [undefined, "git push --mirror origin", "차단", "강제 push"],
+    [undefined, "git push --all origin", "차단", "main에 직접 push"],
+    [undefined, "git push origin HEAD:refs/heads/main", "차단", "main에 직접 push"],
+    [undefined, "git push --force-if-includes --force-with-lease origin feat/x", "허용"],
+    [undefined, "git push", "허용"],
+    [undefined, "git push origin HEAD", "허용"],
+    [undefined, "git push -u origin work", "허용"],
+    // 원격 DB를 바꾸는 supabase CLI
+    [undefined, "supabase db push", "차단", "db push"],
+    [undefined, "npx supabase db push --linked", "차단", "db push"],
+    [undefined, "supabase db reset --db-url postgres://u@h/db", "차단", "초기화"],
+    [
+      undefined,
+      "supabase migration repair --status applied 20260101000000",
+      "차단",
+      "마이그레이션 기록",
+    ],
+    [undefined, "supabase migration up --linked", "차단", "마이그레이션 기록"],
+    [undefined, "supabase functions deploy hello", "차단", "원격 Supabase 프로젝트"],
+    [undefined, "supabase secrets set A=b", "차단", "원격 Supabase 프로젝트"],
+    [undefined, "supabase projects create x", "차단", "원격 Supabase 프로젝트"],
+    [undefined, "supabase branches delete x", "차단", "원격 Supabase 프로젝트"],
+    [
+      undefined,
+      'psql "postgresql://postgres@db.abc.supabase.co:5432/postgres" -c "drop table a"',
+      "차단",
+      "psql",
+    ],
+    [undefined, "supabase migration repair --local --status applied 20260101000000", "허용"],
+    [undefined, "supabase migration up", "허용"],
+    [undefined, "supabase start", "허용"],
+    [undefined, "supabase db diff --linked", "허용"],
+    [undefined, "supabase gen types typescript --local", "허용"],
+    [undefined, "psql -h localhost -U postgres -c 'select 1'", "허용"],
+    // 심볼릭 링크·대소문자
+    ["developer", "ln -s docs d2", "차단", DOCS],
+    ["developer", "ln -s ../docs packages/d", "차단", DOCS],
+    ["developer", "ln -sf /tmp/x docs/prd.md", "차단", DOCS],
+    ["developer", "echo x > d/prd.md", "차단", DOCS],
+    ["developer", "echo x > Docs/prd.md", "차단", DOCS],
+    ["developer", "ln -s ../packages/shared/src/rule.ts packages/r.ts", "허용"],
+    // 훅이 대상을 풀 수 있게 된 쓰기
+    ["developer", "rsync -a /tmp/a docs/prd.md", "차단", DOCS],
+    ["developer", "tar -xf a.tar -C docs", "차단", DOCS],
+    ["developer", "unzip a.zip -d docs", "차단", DOCS],
+    ["developer", "patch docs/prd.md < p.diff", "차단", DOCS],
+    ["developer", "patch -p1 < fix.patch", "차단", DOCS],
+    ["developer", "git apply fix.patch", "차단", DOCS],
+    ["developer", "ex -sc '%s/a/b/|x' docs/prd.md", "차단", DOCS],
+    ["developer", "awk -i inplace '{print}' docs/prd.md", "차단", DOCS],
+    ["developer", "rm {docs,x}/prd.md", "차단", DOCS],
+    // 훅이 풀 수 없는 쓰기 + 보호 경로 문자열 → 개발 역할만 보수적으로 차단
+    [
+      "developer",
+      "cd $(git rev-parse --show-toplevel)/docs && echo x > prd.md",
+      "차단",
+      "풀 수 없는 쓰기",
+    ],
+    ["developer", "D=docs; echo x > $D/prd.md", "차단", "풀 수 없는 쓰기"],
+    ["developer", "ls docs | xargs rm", "차단", "풀 수 없는 쓰기"],
+    ["developer", "node scripts/gen.js docs/prd.md", "차단", "풀 수 없는 쓰기"],
+    ["developer", "bash ./x.sh docs", "차단", "풀 수 없는 쓰기"],
+    ["developer", "./x.sh supabase/tests/acceptance/17-example.test.ts", "차단", "풀 수 없는 쓰기"],
+    ["developer", "pnpm exec prettier --write docs/", "차단", "풀 수 없는 쓰기"],
+    ["developer", "git apply < fix.patch && cat supabase/migrations/x", "차단", "풀 수 없는 쓰기"],
+    // 같은 종류의 명령이라도 보호 경로를 건드리지 않으면 허용(오탐 확인)
+    ["developer", "grep -rln PAY docs/ | xargs echo", "허용"],
+    ["developer", "ls docs | xargs wc -l", "허용"],
+    ["developer", "tar -czf /tmp/d.tgz docs", "허용"],
+    ["developer", "tar -tf /tmp/d.tgz", "허용"],
+    ["developer", "rsync -a docs/ /tmp/docs-copy/", "허용"],
+    ["developer", "git log --oneline -- docs/", "허용"],
+    ["developer", "git diff origin/main -- docs/ supabase/migrations/", "허용"],
+    ["developer", "git apply --check fix.patch", "허용"],
+    ["developer", "patch -p1 < src.patch", "허용"],
+    ["developer", "pnpm check", "허용"],
+    ["developer", "pnpm format && git add -A", "허용"],
+    ["developer", "node --experimental-strip-types scripts/check-req-trace.ts", "허용"],
+    ["developer", 'pnpm test && git commit -m "feat: 수강권"', "허용"],
+    ["developer", 'pnpm format && git commit -m "docs: README 고침"', "허용"],
+    ["developer", "/usr/bin/rm -f packages/shared/src/old.ts", "허용"],
+    ["qa", "node scripts/gen.js docs/prd.md", "허용"],
     ["designer", 'git commit -m "feat: x\n\nAcceptance: qa"', "차단", TRAILER],
     ["planner", 'git commit -m "docs: x\n\nAcceptance: qa"', "차단", TRAILER],
     ["qa", 'git commit -m "test: x\n\nAcceptance: qa"', "허용"],
     [undefined, 'git commit -m "test: x\n\nAcceptance: qa"', "허용"],
   ];
+
+  it("main을 checkout한 worktree에서 refspec 없이 push하면 막는다", () => {
+    const result = runHook("guard-bash.mjs", {
+      tool_name: "Bash",
+      cwd: worktree,
+      tool_input: { command: "git push" },
+    });
+    expectVerdict(result, "차단", "main에 직접 push");
+  });
 
   it.each(rows)("%s · %s → %s", (role, command, verdict, reason) => {
     const result = runHook("guard-bash.mjs", {
@@ -398,6 +583,9 @@ describe("guard-mcp: 위험한 Supabase MCP 도구 (이슈 #17)", () => {
     "deploy_edge_function",
     "create_edge_function_secret",
     "confirm_cost",
+    "run_notebook",
+    "create_notebook",
+    "delete_notebook",
   ];
   const prefixes = [
     "mcp__Supabase__",
@@ -449,12 +637,43 @@ describe("guard-mcp: 위험한 Supabase MCP 도구 (이슈 #17)", () => {
     "mcp__Supabase__get_project",
     "mcp__Supabase__generate_typescript_types",
     "mcp__Supabase__search_docs",
+    "mcp__Supabase__get_notebook",
+    "mcp__Supabase__list_notebooks",
   ])("읽기 도구는 matcher에 걸리지 않고 허용: %s", (toolName) => {
     expect(matcher.test(toolName)).toBe(false);
     expectVerdict(
       runHook("guard-mcp.mjs", { tool_name: toolName, tool_input: { project_id: "p" } }),
       "허용",
     );
+  });
+});
+
+describe("로컬 .claude/settings.json (이슈 #17)", () => {
+  const settings = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../.claude/settings.json", import.meta.url)), "utf8"),
+  );
+  const plugin = JSON.parse(readFileSync(join(HOOKS, "hooks.json"), "utf8"));
+
+  it("PreToolUse 훅은 레포의 플러그인 스크립트를 그대로 부르고 matcher가 같다", () => {
+    const local = settings.hooks.PreToolUse.map(
+      (e: { matcher: string; hooks: { command: string }[] }) => [
+        e.matcher,
+        e.hooks[0]?.command.replace(
+          "$CLAUDE_PROJECT_DIR/plugins/vocals-team",
+          "${CLAUDE_PLUGIN_ROOT}",
+        ),
+      ],
+    );
+    const fromPlugin = plugin.hooks.PreToolUse.map(
+      (e: { matcher: string; hooks: { command: string }[] }) => [e.matcher, e.hooks[0]?.command],
+    );
+    expect(local).toEqual(fromPlugin);
+  });
+
+  it("permissions deny에 위험한 Supabase 도구가 있다", () => {
+    for (const tool of ["execute_sql", "apply_migration", "create_project", "run_notebook"]) {
+      expect(settings.permissions.deny).toContain(`mcp__Supabase__${tool}`);
+    }
   });
 });
 

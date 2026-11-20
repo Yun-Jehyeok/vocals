@@ -78,6 +78,7 @@ plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀�
 ## 훅과 CI
 
 - 차단 훅은 `vocals-team` 플러그인 훅(`plugins/vocals-team/hooks/`)에 있다. 클라우드와 로컬 모두 플러그인을 켜면 돈다: 강제 push·main 직접 push·원격 DB 초기화, `.env`·기존 마이그레이션 수정, 위험한 Supabase MCP 도구(원격 프로젝트·브랜치·SQL·마이그레이션 적용 등)를 막고, 역할 에이전트마다 담당 밖 파일 수정을 막는다(표는 플러그인 README).
-- 로컬 `.claude/settings.json`에는 끝내기 전 `pnpm check` 훅(Stop)과 위험한 Supabase MCP 도구의 permissions deny만 둔다. 클라우드 스레드는 settings를 적용하지 않는다.
-- 훅은 1차 방어다. 최종 보증은 GitHub Actions CI(`.github/workflows/ci.yml`)가 모든 PR에서 한다: 인수 테스트 보호, 기존 마이그레이션 보호, 요구사항 추적(기준선 증가 포함), ERD 드리프트. CI가 실패하면 고친다(위 `pnpm check`의 예외는 같다).
+- 로컬 `.claude/settings.json`은 같은 차단 스크립트를 레포 경로에서 직접 부르고(항상 최신 규칙), 끝내기 전 `pnpm check` 훅(Stop)과 위험한 Supabase MCP 도구의 permissions deny를 둔다. 클라우드 스레드는 settings를 적용하지 않는다.
+- 훅은 1차 방어다. 최종 보증은 GitHub Actions CI(`.github/workflows/ci.yml`)가 모든 PR에서 한다: 인수 테스트 보호, 기존 마이그레이션 보호, 요구사항 추적(기준선 증가 포함), ERD 드리프트, 하네스 변경 라벨.
+- 하네스(훅, CI, 검사·센서, 보호 목록, 검사를 부르는 package.json scripts)를 바꾸는 PR은 팀장이 `harness` 라벨을 붙여야 CI를 통과한다. 라벨 없이 바꿨으면 되돌리거나 [보고]로 라벨을 요청한다. CI가 실패하면 고친다(위 `pnpm check`의 예외는 같다).
 - 기계로 막을 수 없는 규칙(2단계 기능 금지, 문서에 없는 결정 금지 등)은 이 파일과 `.claude/rules/`에 남는다. seed.sql·테스트 shim은 개발이 바꿔야 해서 막지 않고 QA 판정으로 통제한다.
