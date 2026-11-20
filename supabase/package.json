@@ -7,7 +7,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:reset": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/reset-local-db.ts",
-    "db:query": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/query-local-db.ts"
+    "db:query": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/query-local-db.ts",
+    "check:erd-drift": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/check-erd-drift.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.16",
