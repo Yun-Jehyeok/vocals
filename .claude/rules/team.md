@@ -22,7 +22,9 @@ PM(사람)이 결정하고, 팀장(메인 세션)이 일을 나누고, 역할 �
 - QA의 인수 테스트 커밋 직후 draft PR의 Test 실패는 예상된 것이다. 하네스 검사(`pnpm check:harness`)는 그때도 통과해야 한다. ready 전에는 전부 통과한다.
 - 판정 헬퍼(`supabase/tests/helpers/db.ts`, `rls-matrix.ts`)도 인수 테스트처럼 QA만 바꾼다.
 - E2E·Figma 비교는 앱·화면이 생기는 이슈부터 쓴다.
-- `pnpm check`와 CI가 인수 테스트 보호, 요구사항 추적, ERD 드리프트를 검사한다(`scripts/README.md`).
+- `pnpm check`와 CI가 인수 테스트 보호, 기존 마이그레이션 보호, 요구사항 추적, ERD 드리프트를 검사한다(`scripts/README.md`).
+- 플러그인 훅이 역할마다 담당 밖 파일 수정을 막는다(개발: docs/·인수 테스트, QA: 테스트 밖, 기획: docs/ 밖, 디자인: 코드). 막히면 메시지의 "대신 할 일"대로 `[질문]`으로 넘긴다. 훅을 우회하지 않는다.
+- 하네스(훅·CI·검사·보호 목록)를 바꾸는 PR에는 팀장이 내용을 보고 `harness` 라벨을 붙인다. 라벨이 없으면 CI가 실패한다.
 
 에이전트 정의는 `plugins/vocals-team/agents/`에 있다. 플러그인이 없는 세션에서는 팀장이 해당 파일 내용을 프롬프트에 넣어 기본 에이전트(general-purpose)에게 맡긴다.
 

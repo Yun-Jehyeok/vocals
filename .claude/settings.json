@@ -1,29 +1,96 @@
 {
   "extraKnownMarketplaces": {
     "vocals": {
-      "source": { "source": "github", "repo": "Yun-Jehyeok/vocals" }
+      "source": {
+        "source": "github",
+        "repo": "Yun-Jehyeok/vocals"
+      }
     }
   },
   "enabledPlugins": {
     "vocals-team@vocals": true
   },
+  "permissions": {
+    "deny": [
+      "mcp__supabase__create_project",
+      "mcp__supabase__pause_project",
+      "mcp__supabase__restore_project",
+      "mcp__supabase__create_branch",
+      "mcp__supabase__delete_branch",
+      "mcp__supabase__merge_branch",
+      "mcp__supabase__reset_branch",
+      "mcp__supabase__rebase_branch",
+      "mcp__supabase__apply_migration",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__deploy_edge_function",
+      "mcp__supabase__create_edge_function_secret",
+      "mcp__supabase__confirm_cost",
+      "mcp__supabase__run_notebook",
+      "mcp__supabase__create_notebook",
+      "mcp__supabase__delete_notebook",
+      "mcp__Supabase__create_project",
+      "mcp__Supabase__pause_project",
+      "mcp__Supabase__restore_project",
+      "mcp__Supabase__create_branch",
+      "mcp__Supabase__delete_branch",
+      "mcp__Supabase__merge_branch",
+      "mcp__Supabase__reset_branch",
+      "mcp__Supabase__rebase_branch",
+      "mcp__Supabase__apply_migration",
+      "mcp__Supabase__execute_sql",
+      "mcp__Supabase__deploy_edge_function",
+      "mcp__Supabase__create_edge_function_secret",
+      "mcp__Supabase__confirm_cost",
+      "mcp__Supabase__run_notebook",
+      "mcp__Supabase__create_notebook",
+      "mcp__Supabase__delete_notebook",
+      "mcp__claude_ai_Supabase__create_project",
+      "mcp__claude_ai_Supabase__pause_project",
+      "mcp__claude_ai_Supabase__restore_project",
+      "mcp__claude_ai_Supabase__create_branch",
+      "mcp__claude_ai_Supabase__delete_branch",
+      "mcp__claude_ai_Supabase__merge_branch",
+      "mcp__claude_ai_Supabase__reset_branch",
+      "mcp__claude_ai_Supabase__rebase_branch",
+      "mcp__claude_ai_Supabase__apply_migration",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "mcp__claude_ai_Supabase__deploy_edge_function",
+      "mcp__claude_ai_Supabase__create_edge_function_secret",
+      "mcp__claude_ai_Supabase__confirm_cost",
+      "mcp__claude_ai_Supabase__run_notebook",
+      "mcp__claude_ai_Supabase__create_notebook",
+      "mcp__claude_ai_Supabase__delete_notebook"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/plugins/vocals-team/hooks/guard-files.mjs\"",
+            "timeout": 30
+          }
+        ]
+      },
       {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.mjs\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/plugins/vocals-team/hooks/guard-bash.mjs\"",
+            "timeout": 30
           }
         ]
       },
       {
-        "matcher": "Edit|MultiEdit|Write",
+        "matcher": "^mcp__.+__(create_project|pause_project|restore_project|create_branch|delete_branch|merge_branch|reset_branch|rebase_branch|apply_migration|execute_sql|deploy_edge_function|create_edge_function_secret|confirm_cost|run_notebook|create_notebook|delete_notebook)$",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-files.mjs\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/plugins/vocals-team/hooks/guard-mcp.mjs\"",
+            "timeout": 30
           }
         ]
       }
