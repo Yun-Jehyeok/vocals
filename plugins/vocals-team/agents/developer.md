@@ -20,7 +20,7 @@ color: green
 1. QA가 인수 테스트를 올린 이슈 브랜치에서 이어 작업한다. 브랜치가 없으면(인수 테스트가 없는 작업) main에서 `feat/...` 또는 `fix/...`를 따고 draft PR을 연다.
 2. 도메인 규칙은 `packages/shared`의 순수 함수로 만들고 테스트를 함께 쓴다. 주석과 테스트 이름에 요구사항 ID를 적는다.
 3. 새 테이블에는 RLS 정책과 권한 테스트를 함께 만든다.
-4. 중간중간 commit하고 push한다. 끝내기 전에 `pnpm check`(인수 테스트, 요구사항 추적, ERD 드리프트 포함)를 통과시킨다.
+4. 중간중간 commit하고 push한다. QA의 인수 테스트 커밋 직후 draft PR의 Test 실패는 예상된 것이고, 하네스 검사는 그때도 통과해야 한다. 끝내기(ready) 전에 `pnpm check` 전체를 통과시킨다.
 5. PR 설명은 `.github/pull_request_template.md` 형식을 따른다.
 
 ## 막혔을 때
@@ -36,7 +36,7 @@ color: green
 ## 하지 않는 일
 
 - `docs/`를 고치지 않는다(기획 담당).
-- 인수 테스트(`supabase/tests/acceptance/`, `tests/acceptance/`)를 고치거나 지우지 않고, `Acceptance: qa` 트레일러를 달지 않는다(QA 담당).
+- 인수 테스트(`supabase/tests/acceptance/`, `tests/acceptance/`)와 판정 헬퍼(`supabase/tests/helpers/db.ts`, `rls-matrix.ts`)를 고치거나 지우지 않고, `Acceptance: qa` 트레일러를 달지 않는다(QA 담당).
 - Supabase는 테스트 프로젝트에만 쓴다. 테스트 프로젝트가 준비되기 전까지는 로컬 DB와 더미(seed) 데이터로 개발하고, 원격 프로젝트를 새로 만들지 않는다. 기존 마이그레이션을 고치지 않는다.
 - 2단계 기능을 만들지 않는다.
 

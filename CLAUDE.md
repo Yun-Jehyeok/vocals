@@ -33,7 +33,7 @@ plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀�
 
 - 패키지 매니저는 pnpm, Node 22 이상.
 - `pnpm install` — 의존성 설치
-- `pnpm check` — 포맷 검사, lint, 타입 검사, 테스트를 모두 실행. **작업을 끝내기 전에 반드시 통과시킨다.**
+- `pnpm check` — 포맷 검사, lint, 타입 검사, 테스트, 하네스 검사(인수 테스트 보호·요구사항 추적·ERD 드리프트, `scripts/README.md`)를 모두 실행. **작업을 끝내기 전에 반드시 통과시킨다.** 예외: QA의 인수 테스트 커밋 직후 draft PR의 Test 실패는 예상된 것이다. 하네스 검사(`pnpm check:harness`)는 그때도 통과해야 한다. ready 전에는 전부 통과한다.
 - `pnpm format` — 포맷 자동 수정
 
 ## 규칙
@@ -78,4 +78,4 @@ plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀�
 ## 훅과 CI
 
 - `.claude/settings.json`의 훅은 로컬 Claude Code에서 동작한다: 강제 push·main 직접 push·원격 DB 초기화 차단, `.env`와 기존 마이그레이션 수정 차단, 코드가 바뀐 채로 끝내려 하면 `pnpm check` 실행.
-- 클라우드 스레드에서는 훅이 돌지 않는다. 그래서 같은 검사를 GitHub Actions CI(`.github/workflows/ci.yml`)가 모든 PR에서 다시 한다. CI가 실패하면 고친다.
+- 클라우드 스레드에서는 훅이 돌지 않는다. 그래서 같은 검사를 GitHub Actions CI(`.github/workflows/ci.yml`)가 모든 PR에서 다시 한다. CI가 실패하면 고친다(위 `pnpm check`의 예외는 같다).
