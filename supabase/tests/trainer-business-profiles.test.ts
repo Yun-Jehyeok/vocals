@@ -87,6 +87,37 @@ describe("trainer_business_profiles 만들기 — AUTH-04, T-01", () => {
     expect(rows[0]).toEqual({ business_type: "sole_proprietor", payout_seller_id: null });
   });
 
+  // QA 보고(PR #13): 행이 없을 때 insert로 확정 4를 우회하던 문제
+  it.each([
+    ["approved", SEED.trainerApproved],
+    ["rejected", SEED.trainerRejected],
+    ["suspended", SEED.trainerSuspended],
+  ])(
+    "%s 트레이너는 사업자 정보 행이 없어도 새로 넣을 수 없다 — AUTH-04 (확정 4)",
+    async (_, trainerId) => {
+      await expect(
+        withActor(
+          db,
+          asUser(trainerId),
+          (tx) =>
+            tx.query(
+              `insert into public.trainer_business_profiles (trainer_id, business_type, business_registration_no)
+               values ($1, 'corporation', '000-00-99999')`,
+              [trainerId],
+            ),
+          {
+            setup: (tx) =>
+              tx
+                .query(`delete from public.trainer_business_profiles where trainer_id = $1`, [
+                  trainerId,
+                ])
+                .then(() => undefined),
+          },
+        ),
+      ).rejects.toThrow(/row-level security/);
+    },
+  );
+
   it.each([
     ["payout_seller_id", "'x'"],
     ["payout_account_masked", "'x'"],
@@ -129,7 +160,8 @@ describe("trainer_business_profiles 만들기 — AUTH-04, T-01", () => {
         `insert into public.trainer_business_profiles (trainer_id, business_type) values ($1, 'individual')`,
         [SEED.student1],
       ),
-    ).rejects.toThrow(/foreign key/);
+    ) // 프로필이 없어 승인 상태가 없으므로 RLS가 먼저 막는다. FK도 막는다.
+      .rejects.toThrow(/row-level security|foreign key/);
   });
 });
 

@@ -6,7 +6,7 @@ import {
   USER_STATUSES,
 } from "@vocals/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestDb, queryAs, service, withActor } from "./helpers/db.ts";
+import { anon, createTestDb, queryAs, service, withActor } from "./helpers/db.ts";
 import { NEW_USER_ID, SEED } from "./helpers/seed-ids.ts";
 
 let db: PGlite;
@@ -91,6 +91,38 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
     );
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.filter((row) => !row.rls).map((row) => row.table_name)).toEqual([]);
+  });
+
+  it("private 함수 실행 권한은 필요한 역할에만 있다 (anon은 공개 프로필 판정만)", async () => {
+    const { rows } = await db.query<{ fn: string; anon: boolean; authenticated: boolean }>(
+      `select p.proname as fn,
+              has_function_privilege('anon', p.oid, 'execute') as anon,
+              has_function_privilege('authenticated', p.oid, 'execute') as authenticated
+       from pg_proc p
+       where p.pronamespace = 'private'::regnamespace
+       order by 1`,
+    );
+    const byName = Object.fromEntries(rows.map((row) => [row.fn, row]));
+    expect(rows.filter((row) => row.anon).map((row) => row.fn)).toEqual([
+      "trainer_profile_is_public",
+    ]);
+    for (const fn of [
+      "is_admin",
+      "user_role",
+      "trainer_approval_status",
+      "trainer_can_edit_business_info",
+      "generate_link_slug",
+    ]) {
+      expect(byName[fn]?.authenticated, fn).toBe(true);
+    }
+    // 트리거 함수는 트리거로만 실행된다.
+    expect(byName["trainer_profiles_before_write"]?.authenticated).toBe(false);
+  });
+
+  it("anon은 SECURITY DEFINER 함수로 비공개 프로필의 승인 상태를 알아낼 수 없다", async () => {
+    await expect(
+      queryAs(db, anon, `select private.trainer_approval_status($1)`, [SEED.trainerPending]),
+    ).rejects.toThrow(/permission denied/);
   });
 
   it("DB enum 값이 packages/shared/src/domain.ts의 값과 같다", async () => {

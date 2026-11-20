@@ -313,8 +313,19 @@ create index trainer_genres_genre_id_idx on public.trainer_genres (genre_id);
 -- 함수 실행 권한
 -- ---------------------------------------------------------------------------
 
-revoke all on all functions in schema private from public;
-grant execute on all functions in schema private to anon, authenticated, service_role;
+-- 함수마다 그 함수를 부르는 정책·기본값·트리거가 쓰는 역할에만 준다.
+-- anon은 공개 프로필 판정만 쓴다. SECURITY DEFINER 함수는 anon에게 주지 않는다.
+-- 트리거 함수는 실행 권한을 트리거를 만들 때만 확인하므로 아무 역할에도 주지 않는다.
+revoke all on all functions in schema private from public, anon, authenticated, service_role;
+grant execute on function private.trainer_profile_is_public(public.trainer_profiles_approval_status)
+  to anon, authenticated, service_role;
+grant execute on function private.is_admin() to authenticated, service_role;
+grant execute on function private.user_role(uuid) to authenticated, service_role;
+grant execute on function private.trainer_approval_status(uuid) to authenticated, service_role;
+grant execute on function private.trainer_can_edit_business_info(
+  public.trainer_profiles_approval_status
+) to authenticated, service_role;
+grant execute on function private.generate_link_slug() to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- RLS 켜기 (모든 테이블)
@@ -401,8 +412,13 @@ grant update (
   is_pilot
 ) on public.trainer_profiles to authenticated;
 
+-- anon은 공개 프로필만. 로그인 사용자는 공개 프로필 + 자기 프로필, 운영자는 전부.
+create policy trainer_profiles_select_anon on public.trainer_profiles
+for select to anon
+using (private.trainer_profile_is_public(approval_status));
+
 create policy trainer_profiles_select on public.trainer_profiles
-for select to anon, authenticated
+for select to authenticated
 using (
   private.trainer_profile_is_public(approval_status)
   or user_id = (select auth.uid())
@@ -434,9 +450,13 @@ for select to authenticated
 using (trainer_id = (select auth.uid()) or (select private.is_admin()));
 
 -- AUTH-04, T-01: 트레이너가 가입 신청할 때 자기 프로필에 붙여 만든다.
+-- 확정 4: 고치기와 같이 pending 동안만. 승인 뒤 행이 없을 때 새로 넣어 우회하지 못하게 한다.
 create policy trainer_business_profiles_insert_own on public.trainer_business_profiles
 for insert to authenticated
-with check (trainer_id = (select auth.uid()));
+with check (
+  trainer_id = (select auth.uid())
+  and private.trainer_can_edit_business_info(private.trainer_approval_status(trainer_id))
+);
 
 -- 확정 4: 트레이너 본인은 pending 동안만 고친다.
 create policy trainer_business_profiles_update_own on public.trainer_business_profiles
