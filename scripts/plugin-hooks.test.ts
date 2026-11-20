@@ -92,6 +92,8 @@ beforeAll(() => {
   write("msg.txt", "feat: x\n\nAcceptance: qa\n");
   write("clean-msg.txt", "feat: x\n\nCo-Authored-By: a <a@example.com>\n");
   write("tmpl.txt", "feat: x\n");
+  write("w.py", "open('docs/prd.md', 'w').write('x')\n");
+  write("w.sh", "echo x > docs/prd.md\n");
   write(
     "fix.patch",
     "diff --git a/docs/prd.md b/docs/prd.md\n--- a/docs/prd.md\n+++ b/docs/prd.md\n@@ -1 +1 @@\n-# PRD\n+# X\n",
@@ -542,6 +544,58 @@ describe("guard-bash: 명령 규칙과 Bash 파일 쓰기 (이슈 #17)", () => {
     ["developer", 'pnpm format && git commit -m "docs: README 고침"', "허용"],
     ["developer", "/usr/bin/rm -f packages/shared/src/old.ts", "허용"],
     ["qa", "node scripts/gen.js docs/prd.md", "허용"],
+    // 인터프리터 표준 입력 코드(heredoc, here-string, < 파일, 파이프)도 -c/-e처럼 본다
+    ["developer", "python3 - <<'EOF'\nopen('docs/prd.md', 'w').write('x')\nEOF", "차단", DOCS],
+    [
+      "developer",
+      "python3 <<'EOF'\nfrom pathlib import Path\nPath('docs/prd.md').write_text('x')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "node <<'EOF'\nrequire('fs').writeFileSync('docs/prd.md', 'x')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "node - <<'EOF'\nrequire('fs').appendFileSync('supabase/tests/helpers/db.ts', 'x')\nEOF",
+      "차단",
+      ACCEPT,
+    ],
+    ["developer", "ruby <<'EOF'\nFile.write('docs/prd.md', 'x')\nEOF", "차단", DOCS],
+    [
+      "developer",
+      "perl <<'EOF'\nopen(my $f, '>', 'docs/prd.md'); unlink('docs/prd.md');\nEOF",
+      "차단",
+      DOCS,
+    ],
+    ["developer", "bash <<'EOF'\necho x > docs/prd.md\nEOF", "차단", DOCS],
+    ["developer", "sh -s <<'EOF'\nrm -rf docs\nEOF", "차단", DOCS],
+    ["developer", "python3 <<< \"open('docs/prd.md', 'w').write('x')\"", "차단", DOCS],
+    ["developer", "python3 < w.py", "차단", DOCS],
+    ["developer", "bash < w.sh", "차단", DOCS],
+    ["developer", "echo \"require('fs').writeFileSync('docs/prd.md', 'x')\" | node", "차단", DOCS],
+    ["developer", "cat w.py | python3 -", "차단", DOCS],
+    ["developer", "cat <<'EOF' | python3\nopen('docs/prd.md', 'w').write('x')\nEOF", "차단", DOCS],
+    ["developer", "python3 - <<'EOF'\nprint(open('docs/prd.md').read())\nEOF", "허용"],
+    ["developer", "node <<'EOF'\nrequire('fs').writeFileSync('/tmp/out.txt', 'x')\nEOF", "허용"],
+    ["developer", "bash <<'EOF'\necho x > packages/shared/src/new.ts\nEOF", "허용"],
+    [
+      "qa",
+      "python3 - <<'EOF'\nopen('packages/shared/src/rule.ts', 'w').write('x')\nEOF",
+      "차단",
+      QA_ONLY,
+    ],
+    // cp -l(하드 링크)·-s(심볼릭 링크)는 ln처럼 원본도 본다
+    ["developer", "cp -l docs/prd.md /tmp/h", "차단", DOCS],
+    ["developer", "cp --link docs/prd.md /tmp/h", "차단", DOCS],
+    ["developer", "cp -al docs /tmp/docs-hard", "차단", DOCS],
+    ["developer", "cp -s $PWD/docs/prd.md /tmp/s", "차단", "풀 수 없는 쓰기"],
+    ["developer", "cp -l supabase/tests/helpers/db.ts /tmp/h", "차단", ACCEPT],
+    ["developer", "cp -a docs /tmp/docs-copy", "허용"],
+    ["developer", "cp -l packages/shared/src/rule.ts /tmp/h", "허용"],
     ["designer", 'git commit -m "feat: x\n\nAcceptance: qa"', "차단", TRAILER],
     ["planner", 'git commit -m "docs: x\n\nAcceptance: qa"', "차단", TRAILER],
     ["qa", 'git commit -m "test: x\n\nAcceptance: qa"', "허용"],

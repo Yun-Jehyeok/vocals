@@ -17,7 +17,6 @@ export const HARNESS_LABEL = "harness";
 export const HARNESS_PATHS = [
   "scripts/", // acceptance-guard(보호 목록 정의), check-migrations, check-req-trace, 이 검사, 훅 단위 테스트
   "supabase/scripts/check-erd-drift.ts", // ERD 드리프트 센서와 예외 목록(ERD_DRIFT_EXCEPTIONS)
-  "supabase/vitest.config.ts", // 어떤 DB·인수 테스트를 돌릴지
   ".github/", // CI 워크플로, PR 템플릿
   ".claude/", // 로컬 훅·permissions·팀 규칙
   ".claude-plugin/", // 마켓플레이스
@@ -25,11 +24,17 @@ export const HARNESS_PATHS = [
   "plugins/vocals-team/.claude-plugin/",
   "pnpm-workspace.yaml", // 어떤 패키지의 테스트가 도는지
 ] as const;
+/**
+ * 위치와 상관없이 하네스인 파일: 테스트 범위를 정하는 vitest 설정(include를 줄이면 테스트가 조용히 빠진다).
+ * 새로 만든 설정도 잡는다. 예: packages/shared/vitest.config.ts, supabase/vitest.config.ts
+ */
+export const HARNESS_FILE_PATTERNS = [/(^|\/)vitest\.(config|workspace)\.[cm]?[jt]s$/] as const;
 /** 하네스 디렉터리 안이지만 평소 작업에서 바뀌는 파일 */
 export const HARNESS_EXCLUDE = ["scripts/req-trace-baseline.txt"] as const;
 
 export function isHarnessPath(file: string): boolean {
   if ((HARNESS_EXCLUDE as readonly string[]).includes(file)) return false;
+  if (HARNESS_FILE_PATTERNS.some((pattern) => pattern.test(file))) return true;
   return HARNESS_PATHS.some((area) => (area.endsWith("/") ? file.startsWith(area) : file === area));
 }
 
