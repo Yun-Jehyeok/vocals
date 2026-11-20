@@ -7,14 +7,19 @@
   - 테이블·컬럼의 영문 이름과 enum 값은 코드(화면, API, DB)에서도 그대로 쓴다.
   - **(제안)**: PRD에 없고 Claude가 채워 넣은 항목.
   - **[결정 n]**: 이 문서 끝 "결정 필요" n번과 연결된 항목.
-  - 모든 테이블에는 `id`(PK)와 `created_at`이 있다고 보고, 다이어그램에서는 꼭 필요할 때만 적는다.
+  - 모든 테이블에는 `id`(PK)와 `created_at`이 있다고 보고, 다이어그램에서는 꼭 필요할 때만 적는다. 다른 테이블과 1:1인 테이블(`trainer_profiles`, `user_private_profiles`, `user_account_records`, `trainer_business_profiles`)은 `id` 대신 가리키는 FK가 PK다.
+  - `id`는 uuid다. 운영자가 미리 넣는 기준 데이터(`regions`, `genres`)만 int 자동 증가다.
+  - DB의 enum 타입 이름은 `<테이블>_<컬럼>`이다. 예: `users_role`, `trainer_profiles_approval_status`. enum 값은 이 문서와 `packages/shared/src/domain.ts`를 따른다.
 
 ## 1. 용어와 영문 이름
 
 | 용어 | 테이블 |
 |---|---|
 | 사용자 (학생·트레이너·운영자) | `users` |
+| 사용자 개인정보 (본인인증 실명·생년월일·휴대폰) | `user_private_profiles` |
+| 사용자 계정 기록 (연계정보·탈퇴 일정) | `user_account_records` |
 | 트레이너 프로필 | `trainer_profiles` |
+| 트레이너 사업자·정산 정보 | `trainer_business_profiles` |
 | 레슨 상품 | `lesson_products` |
 | 수강 관계 | `enrollments` |
 | 결제 | `payments` |
@@ -37,8 +42,10 @@
 
 ```mermaid
 erDiagram
-    users ||--o{ auth_identities : "로그인 수단"
+    users ||--o| user_private_profiles : "개인정보"
+    users ||--o| user_account_records : "연계정보·탈퇴"
     users ||--o| trainer_profiles : "트레이너면 1개"
+    trainer_profiles ||--|| trainer_business_profiles : "사업자·정산"
     trainer_profiles }o--|| regions : "지역"
     trainer_profiles ||--o{ trainer_genres : ""
     genres ||--o{ trainer_genres : ""
@@ -46,22 +53,23 @@ erDiagram
     videos ||--o| trainer_profile_videos : ""
 
     users {
-        uuid id PK
+        uuid id PK "= Supabase Auth 사용자 id"
         enum role "student, trainer, admin"
         string nickname
         string profile_image_url
+        enum status "active, withdrawn"
+    }
+    user_private_profiles {
+        uuid user_id PK, FK
         string legal_name "본인인증 실명"
         date birth_date "본인인증"
         string phone "본인인증"
+    }
+    user_account_records {
+        uuid user_id PK, FK
         string identity_key UK "중복 가입 확인용 연계정보"
-        enum status "active, withdrawn"
         timestamp withdrawn_at
         timestamp purge_after "탈퇴 후 약 6개월"
-    }
-    auth_identities {
-        uuid user_id FK
-        enum provider "kakao, google, apple"
-        string provider_user_id
     }
     trainer_profiles {
         uuid user_id PK, FK
@@ -74,11 +82,14 @@ erDiagram
         enum approval_status "pending, approved, rejected, suspended"
         bool is_pilot
         bool listed "트레이너 찾기 노출"
+        timestamp approved_at
+    }
+    trainer_business_profiles {
+        uuid trainer_id PK, FK
         enum business_type "individual, sole_proprietor, corporation"
         string business_registration_no "개인이면 없음"
         string payout_seller_id "포트원 파트너 정산 ID"
         string payout_account_masked "은행·끝 4자리"
-        timestamp approved_at
     }
     regions {
         int id PK
@@ -90,6 +101,7 @@ erDiagram
         string name "발라드, R&B 등"
     }
     trainer_genres {
+        uuid id PK
         uuid trainer_id FK
         int genre_id FK
     }
@@ -101,12 +113,21 @@ erDiagram
 ```
 
 - 한 계정은 하나의 역할만 가진다(`role`). 운영자 계정도 따로 쓴다. (AUTH-02, PRD 4장)
+- 로그인 수단(카카오·구글·애플)은 Supabase Auth가 저장한다(`auth.identities`). `users.id`는 Supabase Auth 사용자 id와 같다. 운영자가 로그인 수단을 봐야 하면 서버 함수로 조회한다. (AUTH-01, ADM-07)
+- 남에게 보이면 안 되는 정보는 1:1 별도 테이블에 둔다. 다른 사용자에게는 `users`(닉네임·프로필 사진 등)와 `trainer_profiles`만 보인다. (AUTH-06, CHAT-04)
+  - `user_private_profiles`: 본인인증 결과 중 실명·생년월일·휴대폰 번호. 본인, 운영자, 자기 학생의 트레이너가 본다("자기 학생" 기준은 PRD [결정 5], 수강 관계가 생기는 3장 이후 구현). (AUTH-03, AUTH-09, ADM-07, 화면 A-01, T-08)
+  - `user_account_records`: 중복 가입 확인용 연계정보와 탈퇴 일정. 본인과 운영자만 본다. 트레이너는 자기 학생 것도 보지 못한다. (AUTH-03, AUTH-08, AUTH-09)
+  - 두 테이블 모두 클라이언트가 쓰지 않고 서버가 쓴다. 본인인증을 하지 않는 운영자 계정에는 행이 없을 수 있다.
+  - `trainer_business_profiles`: 사업자 유형과 정산 정보. 그 트레이너와 운영자만 본다. `business_type`, `business_registration_no`는 `pending` 동안만 트레이너가 고치고, 그 뒤에는 운영자만 고친다. `payout_seller_id`, `payout_account_masked`는 서버가 쓴다. (AUTH-04, 화면 T-23, A-01, A-05)
 - 본인인증 결과로 만 19세 미만이면 `users`를 만들지 않는다. (AUTH-03)
 - 본인인증 결과 중 실명, 생년월일, 휴대폰 번호, 중복 가입 확인용 연계정보만 저장한다. 저장 범위는 개인정보 처리방침에 적는다.
-- 탈퇴하면 `status = withdrawn`, `purge_after = 탈퇴일 + 약 6개월`로 두고, 그날이 지나면 계정 정보와 영상을 지운다. 결제·정산 기록은 법정 기간 동안 남긴다. (AUTH-08)
+- 탈퇴하면 `users.status = withdrawn`, `user_account_records`의 `withdrawn_at = 탈퇴일`, `purge_after = 탈퇴일 + 약 6개월`로 두고, 그날이 지나면 계정 정보와 영상을 지운다. 결제·정산 기록은 법정 기간 동안 남긴다. (AUTH-08)
 - 승인 전(`pending`)에는 `link_slug`로 프로필을 열 수 없다. 목록에는 `approved`이면서 `listed = true`인 트레이너만 나온다. (AUTH-05, MKT-01, MKT-07)
+- `link_slug`는 서버가 만들고 아무도 바꿀 수 없다. (TRN-02)
+- 정지(`suspended`)된 트레이너의 프로필은 본인, 운영자, 그 트레이너와 수강 관계(`enrollments`)가 있는 학생만 본다. (ADM-02)
 - 프로필 영상은 3개까지다. (TRN-07)
-- 트레이너의 사업자 유형(`business_type`)을 저장한다. 사업자등록이 없는 개인(`individual`)도 받는다. 사업자이면 사업자등록번호를 함께 저장한다.
+- 지역은 시·도와 시·군·구 두 단계이고, 전국의 시·군·구를 모두 넣는다. 시·군·구는 시 단위로 두고 일반구(예: 성남시 분당구)로 나누지 않는다. 시·군·구가 없는 세종은 `sigungu = '세종특별자치시'`로 둔다. (TRN-08의 예시 "경기 성남시")
+- 트레이너의 사업자 유형(`trainer_business_profiles.business_type`)을 저장한다. 사업자등록이 없는 개인(`individual`)도 받는다. 사업자이면 사업자등록번호를 함께 저장한다.
 - 정산 계좌번호 전체는 저장하지 않는다. 트레이너가 계좌를 입력하면 서버가 PG 지급대행에 셀러로 등록하고, PG가 준 셀러 ID(`payout_seller_id`)와 "은행명·끝 4자리"(`payout_account_masked`)만 저장한다. 매달 지급할 때는 셀러 ID와 금액만 PG에 보낸다. 계좌를 바꾸면 PG에 다시 등록한다. PG별 등록 절차는 계약할 때 확인한다.
 
 ## 3. 상품·결제·수강권
@@ -335,7 +356,6 @@ erDiagram
     trainer_profiles ||--o{ settlements : "월별"
     settlements ||--o{ settlement_items : ""
     session_attendees ||--o| settlement_items : "차감된 회차"
-    fee_policies ||--o{ tickets : "결제 당시 적용"
 
     fee_policies {
         int id PK
@@ -365,9 +385,9 @@ erDiagram
 ```
 
 - 차감된 출결(`deducted = true`) 한 줄이 정산 항목 한 줄이 된다. 그 달에 차감된 항목을 모아 다음 달에 지급한다. (STL-02, STL-04)
-- 수수료율은 유입 경로별로 `fee_policies`에 두고, 결제할 때 수강권에 복사한다. 마켓플레이스 수수료율은 아직 정하지 않았다(`docs/idea.md` 결정 필요 4). (STL-03)
+- 수수료율은 유입 경로별로 `fee_policies`에 두고, 결제할 때 그 값을 수강권의 `tickets.fee_rate`에 복사한다. `tickets`는 `fee_policies`를 FK로 가리키지 않는다(3장 "결제 당시의 수수료율을 복사해 둔다"). 마켓플레이스 수수료율은 아직 정하지 않았다(`docs/idea.md` 결정 필요 4). (STL-03)
 - 파일럿 무료 수강권(`price_paid = 0`)은 정산 항목을 만들지 않는다. (STL-06)
-- 개인 트레이너(`business_type = individual`)에게 지급할 때는 3.3%를 원천징수해 `withholding_tax`에 기록하고 그만큼 빼고 지급한다. (STL-07)
+- 개인 트레이너(`trainer_business_profiles.business_type = individual`)에게 지급할 때는 3.3%를 원천징수해 `withholding_tax`에 기록하고 그만큼 빼고 지급한다. (STL-07)
 - 정산이 `confirmed`가 되면 그 달의 출결은 더 고칠 수 없다. (ATT-06)
 - 트레이너가 끝까지 체크하지 않은 출결(`none`)은 자동으로 바꾸지 않고, 정산되지 않는다.
 
@@ -483,4 +503,9 @@ erDiagram
 
 ## 10. 결정 필요
 
-지금은 없다. PRD와 `docs/idea.md`의 결정 필요 항목이 정해지면 이 문서에 반영한다.
+이 문서에서 새로 생긴 항목은 없다. 데이터 모델에 영향을 주는(★) 남은 항목은 다른 문서에서 다루고, 정해지면 이 문서에 반영한다.
+
+- `docs/prd.md` 결정 필요 3 — 트레이너 정지 시 기존 학생·수강권 처리 (3장. 프로필 공개 범위는 2장에 정했다)
+- `docs/prd.md` 결정 필요 5 — 트레이너가 개인정보를 볼 수 있는 "자기 학생"의 기준 (2장 `user_private_profiles`)
+- `docs/idea.md` 결정 필요 2 — 환불 세부 규칙 (`refunds.amount` 계산, 3장)
+- `docs/idea.md` 결정 필요 4 — 마켓플레이스 유입 학생의 수수료율 (`fee_policies`의 `marketplace` 값, 6장)
