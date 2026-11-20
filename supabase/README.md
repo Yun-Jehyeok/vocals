@@ -71,6 +71,8 @@ pnpm test                             # 전체 (CI와 같다)
 - 경로: `supabase/tests/acceptance/<이슈번호>-<이름>.test.ts` (예: `21-tickets.test.ts`). `pnpm test`에 함께 돈다.
 - 이슈의 완료 조건을 QA가 개발 전에 테스트로 쓴다. 테스트 이름에 요구사항 ID를 넣는다.
 - QA만 쓰고, QA의 커밋에는 메시지 끝에 빈 줄을 두고 트레일러 `Acceptance: qa`를 단다.
+  트레일러(Acceptance, Co-Authored-By, Claude-Session)는 마지막 문단에 빈 줄 없이 한 덩어리로 쓴다(git은 마지막 문단만 트레일러로 읽는다).
+  예: `test: 21 수강권 인수 테스트` / 빈 줄 / `Acceptance: qa` / `Co-Authored-By: …` / `Claude-Session: …`
   `pnpm check:acceptance-guard`(CI 포함)가 이 트레일러 없이 바뀐 인수 테스트를 막는다.
 - 판정에 영향을 주는 헬퍼(`tests/helpers/db.ts`, `tests/helpers/rls-matrix.ts`, `tests/rls-matrix.test.ts`)도 같은 규칙으로 보호한다. `seed.sql`, `seed-ids.ts`, shim은 개발이 고친다.
 - 개발·디자인은 인수 테스트를 고치지 않는다. 틀렸다고 보면 `[질문] 받는 역할: QA`로 보고한다.

@@ -17,7 +17,14 @@ color: orange
    - 경계값: 차감 횟수, 마지막 회차 금액, 취소 마감 24시간 직전·직후, 유효기간 마지막 날
    - 상태 변화: 수강권, 출결, 숙제 제출 상태
 3. 구현 전이라 실패하는 것이 정상이다(draft PR의 Test 실패는 예상된 것). 그래도 `pnpm check:harness`는 통과해야 한다. 테스트가 생긴 요구사항 ID는 `pnpm check:req-trace --update`로 기준선에서 지운다.
-4. 커밋 메시지 끝에 빈 줄을 두고 `Acceptance: qa` 트레일러를 단다. 인수 테스트나 판정 헬퍼(`supabase/tests/helpers/db.ts`, `rls-matrix.ts`)를 바꾸는 커밋은 모두 그렇게 한다.
+4. 커밋 메시지 끝에 빈 줄을 두고 `Acceptance: qa` 트레일러를 단다. 인수 테스트나 판정 헬퍼(`supabase/tests/helpers/db.ts`, `rls-matrix.ts`)를 바꾸는 커밋은 모두 그렇게 한다. 트레일러(Acceptance, Co-Authored-By, Claude-Session)는 메시지 마지막 문단에 빈 줄 없이 한 덩어리로 쓴다. git은 마지막 문단만 트레일러로 읽는다.
+   ```
+   test: 21 수강권 인수 테스트
+
+   Acceptance: qa
+   Co-Authored-By: …
+   Claude-Session: …
+   ```
 
 E2E(Playwright)와 Figma 스크린샷 비교는 앱·화면이 생기는 이슈부터 쓴다.
 
