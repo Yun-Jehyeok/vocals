@@ -35,6 +35,15 @@ importers:
 
   packages/shared: {}
 
+  supabase:
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.16
+        version: 0.5.16
+      '@vocals/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
+
 packages:
 
   '@cacheable/memory@2.2.0':
@@ -42,6 +51,9 @@ packages:
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
+
+  '@electric-sql/pglite@0.5.16':
+    resolution: {integrity: sha512-Nj8KcIsJL748W408U2N8q4+9IlONdpRIU8MJypIAAINMJ5nqKyqpX7Mgg/5XKkXiAib3AoZGR6hnJFlrlLBrcg==}
 
   '@emnapi/core@2.0.0-beta.2':
     resolution: {integrity: sha512-MzCVoWtcg4Pm2B3je5mMvYMvj3MmBKw+fU7vbsJc9/iT8ip6/eYIHo/Dsm/mr+wsHB6SEyJDuxB09Yy6r/8+4A==}
@@ -874,6 +886,8 @@ snapshots:
     dependencies:
       hashery: 1.5.1
       keyv: 5.6.0
+
+  '@electric-sql/pglite@0.5.16': {}
 
   '@emnapi/core@2.0.0-beta.2':
     dependencies:

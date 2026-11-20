@@ -13,3 +13,6 @@ coverage/
 
 # Claude Code 개인 설정
 .claude/settings.local.json
+
+# 로컬 DB (pnpm db:reset)
+supabase/.pglite/
