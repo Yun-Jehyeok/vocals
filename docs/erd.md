@@ -9,7 +9,8 @@
   - **[결정 n]**: 이 문서 끝 "결정 필요" n번과 연결된 항목.
   - 모든 테이블에는 `id`(PK)와 `created_at`이 있다고 보고, 다이어그램에서는 꼭 필요할 때만 적는다. 다른 테이블과 1:1인 테이블(`trainer_profiles`, `user_private_profiles`, `user_account_records`, `trainer_business_profiles`)은 `id` 대신 가리키는 FK가 PK다.
   - `id`는 uuid다. 운영자가 미리 넣는 기준 데이터(`regions`, `genres`)만 int 자동 증가다.
-  - DB의 enum 타입 이름은 `<테이블>_<컬럼>`이다. 예: `users_role`, `trainer_profiles_approval_status`. enum 값은 이 문서와 `packages/shared/src/domain.ts`를 따른다.
+  - DB의 enum 타입 이름은 `<테이블>_<컬럼>`이다. 예: `users_role`, `trainer_profiles_approval_status`. 같은 값을 쓰는 컬럼도 테이블마다 타입을 따로 둔다(예: `lesson_products_lesson_type`과 `tickets_lesson_type`). enum 값은 이 문서와 `packages/shared/src/domain.ts`를 따른다.
+  - enum 컬럼의 주석에는 값을 쉼표로 적고, 설명은 `—` 뒤에 붙인다.
 
 ## 1. 용어와 영문 이름
 
@@ -115,7 +116,7 @@ erDiagram
 - 한 계정은 하나의 역할만 가진다(`role`). 운영자 계정도 따로 쓴다. (AUTH-02, PRD 4장)
 - 로그인 수단(카카오·구글·애플)은 Supabase Auth가 저장한다(`auth.identities`). `users.id`는 Supabase Auth 사용자 id와 같다. 운영자가 로그인 수단을 봐야 하면 서버 함수로 조회한다. (AUTH-01, ADM-07)
 - 남에게 보이면 안 되는 정보는 1:1 별도 테이블에 둔다. 다른 사용자에게는 `users`(닉네임·프로필 사진 등)와 `trainer_profiles`만 보인다. (AUTH-06, CHAT-04)
-  - `user_private_profiles`: 본인인증 결과 중 실명·생년월일·휴대폰 번호. 본인, 운영자, 자기 학생의 트레이너가 본다("자기 학생" 기준은 PRD [결정 5], 수강 관계가 생기는 3장 이후 구현). (AUTH-03, AUTH-09, ADM-07, 화면 A-01, T-08)
+  - `user_private_profiles`: 본인인증 결과 중 실명·생년월일·휴대폰 번호. 본인, 운영자, 자기 학생의 트레이너가 본다. "자기 학생"은 그 트레이너의 `tickets` 중 `status`가 `waiting_schedule` 또는 `active`인 것이 있는 학생이다(3장의 테이블이 생긴 뒤 구현). (AUTH-03, AUTH-09, ADM-07, 화면 A-01, T-08)
   - `user_account_records`: 중복 가입 확인용 연계정보와 탈퇴 일정. 본인과 운영자만 본다. 트레이너는 자기 학생 것도 보지 못한다. (AUTH-03, AUTH-08, AUTH-09)
   - 두 테이블 모두 클라이언트가 쓰지 않고 서버가 쓴다. 본인인증을 하지 않는 운영자 계정에는 행이 없을 수 있다.
   - `trainer_business_profiles`: 사업자 유형과 정산 정보. 그 트레이너와 운영자만 본다. `business_type`, `business_registration_no`는 `pending` 동안만 트레이너가 고치고, 그 뒤에는 운영자만 고친다. `payout_seller_id`, `payout_account_masked`는 서버가 쓴다. (AUTH-04, 화면 T-23, A-01, A-05)
@@ -124,6 +125,8 @@ erDiagram
 - 탈퇴하면 `users.status = withdrawn`, `user_account_records`의 `withdrawn_at = 탈퇴일`, `purge_after = 탈퇴일 + 약 6개월`로 두고, 그날이 지나면 계정 정보와 영상을 지운다. 결제·정산 기록은 법정 기간 동안 남긴다. (AUTH-08)
 - 승인 전(`pending`)에는 `link_slug`로 프로필을 열 수 없다. 목록에는 `approved`이면서 `listed = true`인 트레이너만 나온다. (AUTH-05, MKT-01, MKT-07)
 - `link_slug`는 서버가 만들고 아무도 바꿀 수 없다. (TRN-02)
+- 정지(`suspended`)된 트레이너도 자기 `trainer_profiles`, `trainer_genres` 등 프로필 내용을 고칠 수 있다. 공개 범위만 좁아진다. (ADM-02)
+- 탈퇴한 사용자(`users.status = withdrawn`)는 자기 정보를 고칠 수 없다: `users`의 닉네임·프로필 사진, 트레이너 프로필·장르·사업자 정보 모두. (AUTH-07)
 - 정지(`suspended`)된 트레이너의 프로필은 본인, 운영자, 그 트레이너와 수강 관계(`enrollments`)가 있는 학생만 본다. (ADM-02)
 - 프로필 영상은 3개까지다. (TRN-07)
 - 지역은 시·도와 시·군·구 두 단계이고, 전국의 시·군·구를 모두 넣는다. 시·군·구는 시 단위로 두고 일반구(예: 성남시 분당구)로 나누지 않는다. 시·군·구가 없는 세종은 `sigungu = '세종특별자치시'`로 둔다. (TRN-08의 예시 "경기 성남시")
@@ -177,8 +180,8 @@ erDiagram
         uuid enrollment_id FK
         uuid product_id FK
         uuid payment_id FK "파일럿 무료면 없음"
-        enum lesson_type "결제 당시 값"
-        enum ticket_type "결제 당시 값"
+        enum lesson_type "private, group — 결제 당시 상품 값 복사"
+        enum ticket_type "regular, single — 결제 당시 상품 값 복사"
         int total_sessions
         int remaining_sessions
         int price_paid "파일럿 무료면 0"
@@ -506,6 +509,5 @@ erDiagram
 이 문서에서 새로 생긴 항목은 없다. 데이터 모델에 영향을 주는(★) 남은 항목은 다른 문서에서 다루고, 정해지면 이 문서에 반영한다.
 
 - `docs/prd.md` 결정 필요 3 — 트레이너 정지 시 기존 학생·수강권 처리 (3장. 프로필 공개 범위는 2장에 정했다)
-- `docs/prd.md` 결정 필요 5 — 트레이너가 개인정보를 볼 수 있는 "자기 학생"의 기준 (2장 `user_private_profiles`)
 - `docs/idea.md` 결정 필요 2 — 환불 세부 규칙 (`refunds.amount` 계산, 3장)
 - `docs/idea.md` 결정 필요 4 — 마켓플레이스 유입 학생의 수수료율 (`fee_policies`의 `marketplace` 값, 6장)
