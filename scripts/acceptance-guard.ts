@@ -1,8 +1,8 @@
-// acceptance-guard — 인수 테스트는 QA만 바꾼다(이슈 #17).
+// acceptance-guard — 인수 테스트와 판정 헬퍼는 QA만 바꾼다(이슈 #17).
 //
-// 기준 브랜치(origin/main)와의 merge-base 이후 인수 테스트 파일이 바뀌었으면,
+// 기준 브랜치(origin/main)와의 merge-base 이후 보호 경로(PROTECTED_PATHS)의 파일을 건드린 커밋이 있으면,
 // 그 파일의 지금 내용이 `Acceptance: qa` 트레일러가 달린 마지막 커밋의 내용과 같아야 한다.
-// 트레일러 없는 커밋이 인수 테스트를 바꾼 채로 남아 있으면 실패한다.
+// 트레일러 없는 커밋이 보호 파일을 바꾼 채로 남아 있으면 실패한다.
 // 잘못 바꾼 커밋은 되돌리면(git revert) 다시 통과한다.
 //
 // 사용: node scripts/acceptance-guard.ts [--base origin/main] [--head HEAD] [--strict]
@@ -10,8 +10,19 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-/** 인수 테스트 경로. DB 인수 테스트와, 앱이 생기면 쓸 E2E 자리 */
-export const ACCEPTANCE_PATHS = ["supabase/tests/acceptance/", "tests/acceptance/"] as const;
+/**
+ * QA만 바꾸는 경로.
+ * - 인수 테스트: DB 인수 테스트와, 앱이 생기면 쓸 E2E 자리
+ * - 판정에 영향을 주는 헬퍼: 누구로 실행하는지(db.ts), 허용/차단 판정(rls-matrix.ts)과 그 자체 테스트.
+ *   seed·seed-ids·shim은 개발이 새 테이블마다 고쳐야 해서 넣지 않는다.
+ */
+export const PROTECTED_PATHS = [
+  "supabase/tests/acceptance/",
+  "tests/acceptance/",
+  "supabase/tests/helpers/db.ts",
+  "supabase/tests/helpers/rls-matrix.ts",
+  "supabase/tests/rls-matrix.test.ts",
+] as const;
 export const TRAILER_KEY = "Acceptance";
 export const TRAILER_VALUE = "qa";
 
@@ -51,8 +62,8 @@ function blobAt(cwd: string, rev: string, file: string): string | null {
   return tryGit(cwd, ["rev-parse", "--verify", "--quiet", `${rev}:${file}`])?.trim() ?? null;
 }
 
-export function isAcceptancePath(file: string): boolean {
-  return ACCEPTANCE_PATHS.some((prefix) => file.startsWith(prefix));
+export function isProtectedPath(file: string): boolean {
+  return PROTECTED_PATHS.some((prefix) => file.startsWith(prefix));
 }
 
 export function hasQaTrailer(trailerValues: string): boolean {
@@ -63,9 +74,9 @@ export function hasQaTrailer(trailerValues: string): boolean {
 }
 
 const HOW_TO_FIX = [
-  "왜: 인수 테스트는 QA 담당입니다. 개발·디자인이 바꾸면 완료 기준을 스스로 바꾸는 셈이 됩니다.",
+  "왜: 인수 테스트와 판정 헬퍼는 QA 담당입니다. 개발·디자인이 바꾸면 완료 기준을 스스로 바꾸는 셈이 됩니다.",
   "대신 할 일:",
-  "  - 개발·디자인: 인수 테스트를 고치지 말고 되돌리세요(`git revert <커밋>`). 테스트가 틀렸다고 보면 `[질문] 받는 역할: QA`로 보고하세요.",
+  "  - 개발·디자인: 고치지 말고 되돌리세요(`git revert <커밋>`). 테스트나 헬퍼가 틀렸다고 보면 `[질문] 받는 역할: QA`로 보고하세요.",
   "  - QA: 커밋 메시지 끝에 빈 줄을 두고 `Acceptance: qa` 트레일러를 달아 커밋하세요.",
 ];
 
@@ -98,17 +109,18 @@ export function runGuard(options: GuardOptions): GuardResult {
     return skip(`${base}와 ${head}의 merge-base를 찾지 못했습니다(얕은 clone일 수 있음).`);
   }
 
-  const changed = git(cwd, [
-    "diff",
+  // 범위 안의 커밋이 한 번이라도 건드린 파일. 양 끝 diff만 보면 브랜치에서 추가했다가
+  // 지운 파일(merge-base에도 head에도 없음)을 놓친다.
+  const touched = git(cwd, [
+    "log",
+    "--format=",
     "--name-only",
     "--no-renames",
-    mergeBase,
-    head,
+    `${mergeBase}..${head}`,
     "--",
-    ...ACCEPTANCE_PATHS,
-  ])
-    .split("\n")
-    .filter(Boolean);
+    ...PROTECTED_PATHS,
+  ]);
+  const changed = [...new Set(touched.split("\n").filter(Boolean))].sort();
 
   const violations: Violation[] = [];
   for (const file of changed) {
@@ -144,13 +156,13 @@ export function runGuard(options: GuardOptions): GuardResult {
   if (violations.length === 0) {
     const lines = [
       changed.length === 0
-        ? `acceptance-guard: 통과 — ${base} 이후 바뀐 인수 테스트 없음`
-        : `acceptance-guard: 통과 — 바뀐 인수 테스트 ${changed.length}개 모두 QA 커밋 내용과 같음`,
+        ? `acceptance-guard: 통과 — ${base} 이후 바뀐 인수 테스트·판정 헬퍼 없음`
+        : `acceptance-guard: 통과 — 바뀐 보호 파일 ${changed.length}개 모두 QA 커밋 내용과 같음`,
     ];
-    const dirty = tryGit(cwd, ["status", "--porcelain", "--", ...ACCEPTANCE_PATHS]);
+    const dirty = tryGit(cwd, ["status", "--porcelain", "--", ...PROTECTED_PATHS]);
     if (dirty?.trim()) {
       lines.push(
-        "경고: 커밋하지 않은 인수 테스트 변경이 있습니다. QA가 아니면 되돌리세요.",
+        "경고: 커밋하지 않은 인수 테스트·판정 헬퍼 변경이 있습니다. QA가 아니면 되돌리세요.",
         ...dirty.trimEnd().split("\n"),
       );
     }
@@ -160,7 +172,7 @@ export function runGuard(options: GuardOptions): GuardResult {
   return {
     status: "fail",
     lines: [
-      `acceptance-guard: 실패 — \`Acceptance: qa\` 커밋 없이 바뀐 인수 테스트가 있습니다 (기준 ${base}).`,
+      `acceptance-guard: 실패 — \`Acceptance: qa\` 커밋 없이 바뀐 인수 테스트·판정 헬퍼가 있습니다 (기준 ${base}).`,
       ...violations.flatMap((violation) => [
         `- ${violation.file}`,
         ...(violation.commits.length > 0
