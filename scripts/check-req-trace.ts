@@ -5,11 +5,15 @@
 // 아직 테스트가 없는 ID는 기준선 파일에 둔다. 기준선은 줄어들기만 한다(래칫).
 //   - 기준선에 없는 ID에 테스트가 없으면 실패
 //   - 기준선에 있는 ID에 테스트가 생겼으면(또는 문서에서 사라졌으면) 실패 → --update로 기준선을 줄인다
+//   - 기준선이 기준 브랜치(merge-base)보다 늘었으면 실패(2단계). 단 그 브랜치에서 prd.md에 새로 생긴 ID는 허용
 //
-// 사용: node scripts/check-req-trace.ts [--update]
+// 사용: node scripts/check-req-trace.ts [--update] [--base origin/main] [--head HEAD] [--strict]
+//   --strict: 기준 브랜치를 찾지 못하면 실패한다(CI). 없으면 증가 검사만 건너뛰고 경고한다.
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { BaseArgs } from "./git-base.ts";
+import { findMergeBase, missingBase, parseBaseArgs, tryGit } from "./git-base.ts";
 
 export const PRD_PATH = "docs/prd.md";
 export const BASELINE_PATH = "scripts/req-trace-baseline.txt";
@@ -257,10 +261,68 @@ export function report(result: TraceResult): string[] {
   return lines;
 }
 
+export interface GrowthResult {
+  status: "pass" | "fail" | "skip";
+  lines: string[];
+  /** merge-base에서 이미 정의돼 있었는데 기준선에 새로 들어간 ID (테스트가 빠졌다는 뜻) */
+  grown: string[];
+  /** 이 브랜치에서 prd.md에 새로 생겨 기준선에 들어간 ID (허용) */
+  newIds: string[];
+}
+
+/** 기준선 래칫의 반대쪽: 기준선은 기준 브랜치보다 늘어나면 안 된다(이슈 #17 1단계 후속). */
+export function checkBaselineGrowth(
+  cwd: string,
+  baseline: string[],
+  options: BaseArgs,
+): GrowthResult {
+  const found = findMergeBase(cwd, options.base, options.head);
+  if (!found.ok) {
+    return {
+      ...missingBase("check:req-trace 기준선 증가 검사", found.reason, options.strict),
+      grown: [],
+      newIds: [],
+    };
+  }
+  const baseBaseline = tryGit(cwd, ["show", `${found.mergeBase}:${BASELINE_PATH}`]);
+  if (baseBaseline === null) {
+    return {
+      status: "pass",
+      lines: ["기준선 증가 검사: 기준 브랜치에 기준선 파일이 없어 건너뜀"],
+      grown: [],
+      newIds: [],
+    };
+  }
+  const before = new Set(parseBaseline(baseBaseline));
+  const definedBefore = new Set(
+    parseRequirementIds(tryGit(cwd, ["show", `${found.mergeBase}:${PRD_PATH}`]) ?? ""),
+  );
+  const added = baseline.filter((id) => !before.has(id));
+  const grown = added.filter((id) => definedBefore.has(id));
+  const newIds = added.filter((id) => !definedBefore.has(id));
+  const lines: string[] = [];
+  if (newIds.length > 0) {
+    lines.push(
+      `참고: prd.md에 새로 생겨 기준선에 들어간 ID: ${newIds.join(" ")} — PR 설명에 적으세요.`,
+    );
+  }
+  if (grown.length > 0) {
+    lines.push(
+      `실패: 기준선이 ${options.base}보다 늘었습니다: ${grown.join(" ")}`,
+      "  왜: 이미 있던 요구사항을 기준선에 다시 넣으면 그 요구사항의 테스트가 빠진 것입니다. 기준선은 줄어들기만 합니다.",
+      "  대신 할 일: 지우거나 이름을 바꾼 테스트를 되살려 이름에 ID를 넣고, `pnpm check:req-trace --update`로 기준선을 다시 줄이세요.",
+    );
+  }
+  return { status: grown.length > 0 ? "fail" : "pass", lines, grown, newIds };
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const baselinePath = join(root, BASELINE_PATH);
-  const update = process.argv.includes("--update");
+  const { rest, ...baseArgs } = parseBaseArgs(process.argv.slice(2));
+  const update = rest.includes("--update");
+  const unknownArgs = rest.filter((arg) => arg !== "--update");
+  if (unknownArgs.length > 0) throw new Error(`알 수 없는 인자: ${unknownArgs.join(" ")}`);
   let baseline: string[] = [];
   try {
     baseline = parseBaseline(readFileSync(baselinePath, "utf8"));
@@ -281,6 +343,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(0);
   }
   const lines = report(result);
-  (result.ok ? console.log : console.error)(lines.join("\n"));
-  process.exit(result.ok ? 0 : 1);
+  const growth = checkBaselineGrowth(root, baseline, baseArgs);
+  const ok = result.ok && growth.status !== "fail";
+  (ok ? console.log : console.error)([...lines, ...growth.lines].join("\n"));
+  process.exit(ok ? 0 : 1);
 }

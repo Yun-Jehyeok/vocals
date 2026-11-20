@@ -1,6 +1,6 @@
 {
   "name": "vocals-team",
-  "version": "0.1.0",
-  "description": "보컬 레슨 플랫폼 팀: 기획·디자인·개발·QA 에이전트와 팀장 진행 절차",
+  "version": "0.2.0",
+  "description": "보컬 레슨 플랫폼 팀: 기획·디자인·개발·QA 에이전트, 팀장 진행 절차, 역할별 차단 훅",
   "author": { "name": "Yun-Jehyeok" }
 }

@@ -1,8 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  BASELINE_PATH,
+  checkBaselineGrowth,
   extractTestNames,
   formatBaseline,
   parseBaseline,
@@ -132,5 +135,62 @@ describe("요구사항 추적 래칫 (이슈 #17)", () => {
   it("prd.md에 없는 같은 접두어의 ID는 경고 목록에 모은다", () => {
     write("pkg/a.test.ts", 'it("XYZ-01, XYZ-99", () => {});');
     expect(trace(root, []).unknown).toEqual(["XYZ-99"]);
+  });
+});
+
+describe("요구사항 기준선 증가 검사 (이슈 #17 하네스 2단계)", () => {
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "init.defaultBranch=main",
+        ...args,
+      ],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+  const commitAll = (message: string) => {
+    git("add", "-A");
+    git("commit", "-q", "--allow-empty", "-m", message);
+  };
+  const growth = (baseline: string[], base = "main", strict = false) =>
+    checkBaselineGrowth(root, baseline, { base, head: "HEAD", strict });
+
+  beforeEach(() => {
+    git("init", "-q");
+    write(BASELINE_PATH, formatBaseline(["XYZ-02"]));
+    commitAll("chore: 시작");
+    git("checkout", "-q", "-b", "work");
+  });
+
+  it("기준선이 그대로거나 줄면 통과한다", () => {
+    expect(growth(["XYZ-02"]).status).toBe("pass");
+    expect(growth([]).status).toBe("pass");
+  });
+
+  it("이미 정의돼 있던 ID가 기준선에 새로 들어가면 실패한다(테스트가 빠짐)", () => {
+    const result = growth(["XYZ-01", "XYZ-02"]);
+    expect(result.status).toBe("fail");
+    expect(result.grown).toEqual(["XYZ-01"]);
+    expect(result.lines.join("\n")).toContain("대신 할 일:");
+  });
+
+  it("이 브랜치에서 prd.md에 새로 생긴 ID는 기준선에 들어가도 통과하고 알린다", () => {
+    write("docs/prd.md", `${PRD}\n- \`XYZ-05\` 새 요구사항`);
+    commitAll("docs: 새 요구사항");
+    const result = growth(["XYZ-02", "XYZ-05"]);
+    expect(result.status).toBe("pass");
+    expect(result.newIds).toEqual(["XYZ-05"]);
+  });
+
+  it("기준 브랜치가 없으면 경고만 하고, --strict면 실패한다", () => {
+    expect(growth(["XYZ-01"], "origin/nope").status).toBe("skip");
+    expect(growth(["XYZ-01"], "origin/nope", true).status).toBe("fail");
   });
 });

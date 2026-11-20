@@ -52,9 +52,26 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: pnpm check:acceptance-guard --base "origin/$BASE_REF" --head "$HEAD_SHA" --strict
 
+      # 이슈 #17 하네스 2단계. merge-base에 있던 supabase/migrations/* 수정·삭제·이름 변경이면 실패.
+      - name: Migration guard
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm check:migrations --base "origin/$BASE_REF" --head "$HEAD_SHA" --strict
+
+      # PR에서는 기준선이 merge-base보다 늘었는지도 본다(2단계).
       - name: Requirement trace
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: pnpm check:req-trace
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            pnpm check:req-trace --base "origin/$BASE_REF" --head "$HEAD_SHA" --strict
+          else
+            pnpm check:req-trace
+          fi
 
       - name: ERD drift
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}

@@ -33,7 +33,7 @@ plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀�
 
 - 패키지 매니저는 pnpm, Node 22 이상.
 - `pnpm install` — 의존성 설치
-- `pnpm check` — 포맷 검사, lint, 타입 검사, 테스트, 하네스 검사(인수 테스트 보호·요구사항 추적·ERD 드리프트, `scripts/README.md`)를 모두 실행. **작업을 끝내기 전에 반드시 통과시킨다.** 예외: QA의 인수 테스트 커밋 직후 draft PR의 Test 실패는 예상된 것이다. 하네스 검사(`pnpm check:harness`)는 그때도 통과해야 한다. ready 전에는 전부 통과한다.
+- `pnpm check` — 포맷 검사, lint, 타입 검사, 테스트, 하네스 검사(인수 테스트 보호·기존 마이그레이션 보호·요구사항 추적·ERD 드리프트, `scripts/README.md`)를 모두 실행. **작업을 끝내기 전에 반드시 통과시킨다.** 예외: QA의 인수 테스트 커밋 직후 draft PR의 Test 실패는 예상된 것이다. 하네스 검사(`pnpm check:harness`)는 그때도 통과해야 한다. ready 전에는 전부 통과한다.
 - `pnpm format` — 포맷 자동 수정
 
 ## 규칙
@@ -77,5 +77,7 @@ plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀�
 
 ## 훅과 CI
 
-- `.claude/settings.json`의 훅은 로컬 Claude Code에서 동작한다: 강제 push·main 직접 push·원격 DB 초기화 차단, `.env`와 기존 마이그레이션 수정 차단, 코드가 바뀐 채로 끝내려 하면 `pnpm check` 실행.
-- 클라우드 스레드에서는 훅이 돌지 않는다. 그래서 같은 검사를 GitHub Actions CI(`.github/workflows/ci.yml`)가 모든 PR에서 다시 한다. CI가 실패하면 고친다(위 `pnpm check`의 예외는 같다).
+- 차단 훅은 `vocals-team` 플러그인 훅(`plugins/vocals-team/hooks/`)에 있다. 클라우드와 로컬 모두 플러그인을 켜면 돈다: 강제 push·main 직접 push·원격 DB 초기화, `.env`·기존 마이그레이션 수정, 위험한 Supabase MCP 도구(원격 프로젝트·브랜치·SQL·마이그레이션 적용 등)를 막고, 역할 에이전트마다 담당 밖 파일 수정을 막는다(표는 플러그인 README).
+- 로컬 `.claude/settings.json`에는 끝내기 전 `pnpm check` 훅(Stop)과 위험한 Supabase MCP 도구의 permissions deny만 둔다. 클라우드 스레드는 settings를 적용하지 않는다.
+- 훅은 1차 방어다. 최종 보증은 GitHub Actions CI(`.github/workflows/ci.yml`)가 모든 PR에서 한다: 인수 테스트 보호, 기존 마이그레이션 보호, 요구사항 추적(기준선 증가 포함), ERD 드리프트. CI가 실패하면 고친다(위 `pnpm check`의 예외는 같다).
+- 기계로 막을 수 없는 규칙(2단계 기능 금지, 문서에 없는 결정 금지 등)은 이 파일과 `.claude/rules/`에 남는다. seed.sql·테스트 shim은 개발이 바꿔야 해서 막지 않고 QA 판정으로 통제한다.
