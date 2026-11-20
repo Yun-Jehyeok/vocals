@@ -9,7 +9,8 @@
   - **[결정 n]**: 이 문서 끝 "결정 필요" n번과 연결된 항목.
   - 모든 테이블에는 `id`(PK)와 `created_at`이 있다고 보고, 다이어그램에서는 꼭 필요할 때만 적는다. 다른 테이블과 1:1인 테이블(`trainer_profiles`, `user_private_profiles`, `user_account_records`, `trainer_business_profiles`)은 `id` 대신 가리키는 FK가 PK다.
   - `id`는 uuid다. 운영자가 미리 넣는 기준 데이터(`regions`, `genres`)만 int 자동 증가다.
-  - DB의 enum 타입 이름은 `<테이블>_<컬럼>`이다. 예: `users_role`, `trainer_profiles_approval_status`. enum 값은 이 문서와 `packages/shared/src/domain.ts`를 따른다.
+  - DB의 enum 타입 이름은 `<테이블>_<컬럼>`이다. 예: `users_role`, `trainer_profiles_approval_status`. 같은 값을 쓰는 컬럼도 테이블마다 타입을 따로 둔다(예: `lesson_products_lesson_type`과 `tickets_lesson_type`). enum 값은 이 문서와 `packages/shared/src/domain.ts`를 따른다.
+  - enum 컬럼의 주석에는 값을 쉼표로 적고, 설명은 `—` 뒤에 붙인다.
 
 ## 1. 용어와 영문 이름
 
@@ -179,8 +180,8 @@ erDiagram
         uuid enrollment_id FK
         uuid product_id FK
         uuid payment_id FK "파일럿 무료면 없음"
-        enum lesson_type "결제 당시 값"
-        enum ticket_type "결제 당시 값"
+        enum lesson_type "private, group — 결제 당시 상품 값 복사"
+        enum ticket_type "regular, single — 결제 당시 상품 값 복사"
         int total_sessions
         int remaining_sessions
         int price_paid "파일럿 무료면 0"
