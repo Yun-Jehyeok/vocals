@@ -1,3 +1,4 @@
+// 판정 헬퍼: QA만 고친다 (acceptance-guard, 이슈 #17). 바꿔야 하면 `[질문] 받는 역할: QA`.
 import type { PGlite, Transaction } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Actor } from "./db.ts";
