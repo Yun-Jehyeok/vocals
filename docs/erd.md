@@ -122,13 +122,18 @@ erDiagram
   - `trainer_business_profiles`: 사업자 유형과 정산 정보. 그 트레이너와 운영자만 본다. `business_type`, `business_registration_no`는 `pending` 동안만 트레이너가 고치고, 그 뒤에는 운영자만 고친다. `payout_seller_id`, `payout_account_masked`는 서버가 쓴다. (AUTH-04, 화면 T-23, A-01, A-05)
 - 본인인증 결과로 만 19세 미만이면 `users`를 만들지 않는다. (AUTH-03)
 - 본인인증 결과 중 실명, 생년월일, 휴대폰 번호, 중복 가입 확인용 연계정보만 저장한다. 저장 범위는 개인정보 처리방침에 적는다.
-- 탈퇴하면 `users.status = withdrawn`, `user_account_records`의 `withdrawn_at = 탈퇴일`, `purge_after = 탈퇴일 + 약 6개월`로 두고, 그날이 지나면 계정 정보와 영상을 지운다. 결제·정산 기록은 법정 기간 동안 남긴다. (AUTH-08)
+- 탈퇴하면 `users.status = withdrawn`, `user_account_records`의 `withdrawn_at = 탈퇴일`, `purge_after = 탈퇴일 + 약 6개월`로 두고, 그날이 지나면 계정 정보와 영상을 지운다. 영상은 용도(`profile`·`example`·`practice`)와 관계없이 지운다(5장). (PM 결정 2026-11-21) 결제·정산 기록은 법정 기간 동안 남긴다. (AUTH-08)
 - 승인 전(`pending`)에는 `link_slug`로 프로필을 열 수 없다. 목록에는 `approved`이면서 `listed = true`인 트레이너만 나온다. (AUTH-05, MKT-01, MKT-07)
 - `link_slug`는 서버가 만들고 아무도 바꿀 수 없다. (TRN-02)
 - 정지(`suspended`)된 트레이너도 자기 `trainer_profiles`, `trainer_genres` 등 프로필 내용을 고칠 수 있다. 공개 범위만 좁아진다. (ADM-02)
 - 탈퇴한 사용자(`users.status = withdrawn`)는 자기 정보를 고칠 수 없다: `users`의 닉네임·프로필 사진, 트레이너 프로필·장르·사업자 정보 모두. (AUTH-07)
 - 정지(`suspended`)된 트레이너의 프로필은 본인, 운영자, 그 트레이너와 수강 관계(`enrollments`)가 있는 학생만 본다. 프로필 화면(S-01)에 함께 나오는 장르(`trainer_genres`)와 판매 중인 상품(`lesson_products`)도 같은 기준이다. (ADM-02)
 - 프로필 영상은 3개까지다. (TRN-07)
+- `trainer_profile_videos` (TRN-07, ADM-02, AUTH-07)
+  - 트레이너가 자기 프로필 영상을 직접 붙이고, 빼고, `sort_order`를 바꾼다. 정지된 트레이너도 되고, 탈퇴한 트레이너는 못 한다. 영상 행(`videos`)은 서버가 만든다(5장).
+  - 그 트레이너 프로필을 볼 수 있는 사람(로그인하지 않은 사용자 포함)이 본다. 정지된 트레이너의 것은 프로필과 같은 기준(본인·운영자·수강 관계 학생)이다.
+  - DB 제약: 영상은 그 트레이너가 올린 `purpose = profile`, `upload_status = ready` 영상이다. `sort_order`는 1~3이고 트레이너마다 겹치지 않으며, 같은 영상은 한 번만 붙는다.
+  - 프로필에서 빼도 `videos` 행은 지우지 않는다. 붙지 않은 프로필 영상은 올린 트레이너와 운영자만 본다.
 - 지역은 시·도와 시·군·구 두 단계이고, 전국의 시·군·구를 모두 넣는다. 시·군·구는 시 단위로 두고 일반구(예: 성남시 분당구)로 나누지 않는다. 시·군·구가 없는 세종은 `sigungu = '세종특별자치시'`로 둔다. (TRN-08의 예시 "경기 성남시")
 - 트레이너의 사업자 유형(`trainer_business_profiles.business_type`)을 저장한다. 사업자등록이 없는 개인(`individual`)도 받는다. 사업자이면 사업자등록번호를 함께 저장한다.
 - 정산 계좌번호 전체는 저장하지 않는다. 트레이너가 계좌를 입력하면 서버가 PG 지급대행에 셀러로 등록하고, PG가 준 셀러 ID(`payout_seller_id`)와 "은행명·끝 4자리"(`payout_account_masked`)만 저장한다. 매달 지급할 때는 셀러 ID와 금액만 PG에 보낸다. 계좌를 바꾸면 PG에 다시 등록한다. PG별 등록 절차는 계약할 때 확인한다.
@@ -321,7 +326,7 @@ erDiagram
     homeworks ||--o{ homework_videos : "예시 영상"
     videos ||--o{ homework_videos : ""
     homeworks ||--o{ submissions : ""
-    videos ||--|| submissions : "연습 영상"
+    videos |o--o| submissions : "연습 영상"
     submissions ||--o{ feedback_comments : ""
 
     videos {
@@ -374,8 +379,32 @@ erDiagram
 - 숙제 상태는 따로 저장하지 않는다. 그 학생의 `submissions`가 있으면 "제출됨", 없으면 "미제출"이다. 여러 번 제출하면 여러 줄이 쌓인다. (HW-07, HW-11)
 - 연습 영상 없이는 제출을 만들 수 없다(`video_id` 필수). (HW-06)
 - 시점 코멘트는 `at_sec`가 있는 피드백, 텍스트 코멘트는 `at_sec`가 없는 피드백이다. (HW-10)
-- 연습 영상은 `ticket_id`로 수강권과 연결한다. 수강권이 끝나면(`ended`) `purge_after = 종료일 + 1년`으로 정하고, 그 한 달 전에 학생에게 삭제 예고 알림을 보낸 뒤(`purge_notified_at`) 날짜가 되면 지운다. 예시 영상과 프로필 영상은 지우지 않는다. 탈퇴하면 탈퇴 규칙(약 6개월)이 더 빠르면 그 날짜를 쓴다. (HW-14)
-- 숙제 영상은 해당 트레이너, 숙제를 받은 학생, 운영자만 볼 수 있다. 그룹 숙제라도 다른 학생의 제출은 보이지 않는다. (HW-12, NFR-04)
+- 영상 하나는 제출 0~1개에 쓰인다. 제출 전 연습 영상, 예시 영상, 프로필 영상은 제출이 없다. (HW-06)
+- 보관 기한 (HW-14, AUTH-08)
+  - 연습 영상은 `ticket_id`로 수강권과 연결한다. 수강권이 끝나면(`ended`) `purge_after = 종료일 + 1년`으로 정하고, 그 한 달 전에 학생에게 삭제 예고 알림을 보낸 뒤(`purge_notified_at`) 날짜가 되면 지운다.
+  - `purge_after`는 서버가 수강권을 끝낼 때 계산해 넣는다. `tickets`에 종료 시각 컬럼을 따로 두지 않는다. 날짜 계산은 공유 규칙 함수가 하고, DB는 계산·기본값·트리거 없이 넣은 값을 그대로 저장한다.
+  - 예시 영상과 프로필 영상은 수강권 종료 규칙으로는 지우지 않는다. 올린 사람이 탈퇴하면 용도와 관계없이 탈퇴 규칙(약 6개월, 2장)을 따르고, 연습 영상은 두 날짜 중 빠른 날을 쓴다. 그래서 `purge_after`는 용도와 관계없이 넣을 수 있다. (탈퇴 부분은 PM 결정 2026-11-21)
+  - 수강권 종료·탈퇴로 영상·제출·피드백 행이 바로 지워지거나 바뀌지 않는다.
+- 숙제 영상은 해당 트레이너, 숙제를 받은 학생, 운영자만 볼 수 있다. 그룹 숙제라도 다른 학생의 제출은 보이지 않는다. (HW-12, NFR-04) `videos` 행 기준으로는 다음과 같다.
+  - 올린 사람은 자기 영상을 상태와 관계없이 본다. 운영자는 모두 본다.
+  - 예시 영상: 올린 트레이너, 그 영상이 붙은 숙제의 대상 학생. 보관함에서 숨겨도 이미 붙은 숙제의 대상 학생은 계속 본다.
+  - 연습 영상: 올린 학생, 그 영상이 붙은 제출의 숙제 트레이너. 제출에 붙기 전에는 올린 학생과 운영자만 본다.
+  - 수강권이 끝난 뒤에도 `purge_after`까지 해당 트레이너와 학생은 지난 숙제·제출·피드백과 영상을 본다. (PM 결정 2026-11-21)
+  - 프로필 영상: 2장 `trainer_profile_videos` 기준.
+- 학생은 자기가 대상인 숙제와 그 예시 영상 연결, `homework_targets`의 자기 줄만 본다. 같은 숙제를 받은 다른 학생 목록은 보지 않는다. (HW-03, HW-12)
+- 쓰기 경로 (HW-01~HW-13, NFR-03)
+  - `videos` 행 만들기·지우기와 `upload_status`·`duration_sec`·`storage_key`·`ticket_id`·`purge_after`·`purge_notified_at`은 서버가 쓴다(업로드·업로드 완료 처리).
+  - 클라이언트가 직접 쓰는 것: 트레이너의 자기 예시 영상 `hidden_in_library`, 트레이너의 숙제 만들기와 `description`·`due_at` 고치기, 대상·예시 영상 연결 만들기, 학생의 제출 만들기, 트레이너의 피드백 달기. 직접 쓰기는 모두 탈퇴하지 않은 사용자만 한다. (AUTH-07)
+  - 숙제의 `session_id`·`trainer_id`는 바꾸지 않는다. 대상·예시 영상 연결·제출·피드백은 고치거나 지우지 않는다(제출은 HW-07로 남긴다).
+  - 정지된 트레이너도 기존 학생에게 숙제를 내고 피드백을 단다. `docs/prd.md` 결정 필요 3이 정해지면 다시 본다. (ADM-02)
+- 마감(`due_at`)이 지나도, 수강권이 끝난 뒤에도 대상 학생은 제출할 수 있다. 늦음 상태는 없다. `submitted_at`은 DB가 넣는다. (HW-07, HW-11)
+- DB 제약으로 값의 범위와 관계를 지킨다(서버 쓰기에도 걸린다). `purge_after` 날짜 계산은 검사하지 않는다. (HW-01~HW-10, TRN-07)
+  - `videos`: `duration_sec`은 비었거나 1~300이고, `ready`이면 `duration_sec`·`storage_key`가 있다. `storage_key`는 고유하다. `ticket_id`는 `practice`일 때만 있고 반드시 있으며, 그 수강권의 학생이 `owner_id`다. `profile`·`example`은 트레이너, `practice`는 학생이 올린다. `purge_notified_at`은 `purge_after`가 있을 때만 있다. `visibility`는 `private`만이다(9장).
+  - `homeworks`: `trainer_id`는 회차의 트레이너이고, `canceled` 회차에는 만들 수 없다. `description`은 비어 있지 않고 `due_at`은 있다.
+  - `homework_targets`: 학생은 그 회차에 참여 행이 있는 학생이고, (숙제, 학생)은 하나다.
+  - `homework_videos`: 영상은 숙제 트레이너가 올린 `example` 영상이고, (숙제, 영상)은 하나다.
+  - `submissions`: 영상은 제출한 학생이 올린 `practice`·`ready` 영상이고, 그 `ticket_id`는 그 학생의 숙제 회차 참여 행의 수강권이다. 학생은 숙제 대상이다. 영상 하나는 제출 하나에만 쓰인다.
+  - `feedback_comments`: `author_id`는 숙제 트레이너다. `body`는 비어 있지 않고, `at_sec`은 비었거나 0 이상 영상 `duration_sec` 이하다.
 
 ## 6. 정산
 
@@ -532,7 +561,7 @@ erDiagram
 
 ## 10. 결정 필요
 
-데이터 모델에 영향을 주는(★) 남은 항목은 다른 문서에서 다루고, 정해지면 이 문서에 반영한다. 이 문서에서 생긴 항목은 아래 "4장 일정·출결"에 모았다.
+데이터 모델에 영향을 주는(★) 남은 항목은 다른 문서에서 다루고, 정해지면 이 문서에 반영한다. 이 문서에서 생긴 항목은 아래 "4장 일정·출결", "5장 숙제·영상"에 모았다.
 
 - `docs/prd.md` 결정 필요 3 — 트레이너 정지 시 기존 학생·수강권 처리 (3장. 프로필 공개 범위는 2장에 정했다)
 - `docs/idea.md` 결정 필요 2 — 환불 세부 규칙 (`refunds.amount` 계산, 3장)
@@ -545,3 +574,7 @@ erDiagram
 - 1:1 재결제 때 "기존 고정 일정을 새 수강권에 이어 붙인다"(3장, PAY-07)가 새 `fixed_schedules` 행인지, 기존 일정에 새 수강권 참여 행을 만드는 것인지.
 - 1:1 회차 길이(`ends_at`)의 기준(상품 `duration_min` 등).
 - 출결 수정(ATT-06) 때 차감 되돌리기와 `session_amount` 재계산(마지막 차감의 나머지). 금액 계산 로직이라 PM 승인이 필요하다.
+
+### 5장 숙제·영상 — 서버 함수 이슈에서 정할 것 (#35에서 넘김)
+
+- 숙제 마감 기본값 "다음 레슨 전"(HW-02)에서 다음 회차가 없을 때(마지막 회차)의 기본값.
