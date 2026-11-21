@@ -21,3 +21,5 @@
 - 매트릭스 `attempt`는 트리거 거부(P0001)를 던진다. 클라이언트 칸의 시도 SQL은 RLS로 막히는 값(남의 id)만 쓰고, "본인 id로 남의 대상에 쓰기"는 `attemptWrite`로 따로 둔다(#35).
 - 판정 시작 전 `git fetch origin '+refs/heads/<브랜치>:refs/remotes/origin/<브랜치>'`로 PR head를 직접 받는다. 그냥 `git fetch`로는 원격 브랜치가 갱신되지 않을 때가 있다(#35, head sha는 `gh api .../pulls/<n> --jq .head.sha`로 대조).
 - 무결성 트리거를 security definer로 두면 BEFORE 트리거가 RLS보다 먼저 돌아 권한 없는 사람에게 오류 코드(23514 vs 42501)로 관계가 샌다. 반려 사유는 아니지만 판정 때 카탈로그(prosecdef·proconfig·실행 권한)와 함께 보고한다(#35).
+- 오류 코드 누출 점검: insert만 본다. update·delete는 RLS using이 먼저 행을 걸러 권한 없는 사람에게 트리거가 돌지 않는다(0행). 누출은 "남의 id를 본인 칸이 아닌 소유 칸(trainer_id·author_id·student_id)에 넣는" insert에서 난다. SQLSTATE를 그대로 돌려주는 로컬 `outcome()`으로 정확한 코드를 단언한다(#38).
+- 셸 표준 입력이나 heredoc에 마이그레이션 파일 이름이 들어가면 QA 훅이 그 파일을 고치는 것으로 읽고 막는다. PR·리뷰 글은 Write 도구로 파일을 만들어 `-F body=@파일`로 보낸다(#38).

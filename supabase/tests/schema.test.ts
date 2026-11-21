@@ -303,6 +303,8 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "lesson_sessions_before_write",
       "lesson_sessions_before_delete",
       "session_attendees_before_write",
+      // 이슈 #38
+      "authorize_client_insert",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(false);
     }
