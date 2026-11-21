@@ -15,3 +15,4 @@
 - Postgres는 BEFORE 트리거 뒤에 RLS WITH CHECK를 본다. 클라이언트가 쓰는 테이블의 무결성 트리거가 쓰는 사람의 RLS로 읽으면, 권한 없는 사람의 바른 값 시도가 42501이 아니라 P0001로 끝나 매트릭스(attempt)가 판정을 못 한다. 그런 트리거 함수는 `security definer`(실행 권한은 아무에게도 안 줌)로 읽는다(#35).
 - 새 테이블·enum을 만들면 `supabase/tests/schema.test.ts`의 `ERD_COLUMNS`·`DOMAIN_ENUMS`·실행 권한 목록, 테이블 단위 DELETE를 주면 `qa-boundaries.test.ts` 목록에 더한다(#35).
 - `gh issue view`·`gh pr view`는 GraphQL이라 403이다. `gh api repos/Yun-Jehyeok/vocals/issues/<n>`·`.../issues/<n>/comments`·`.../pulls/<n>`(REST)로 읽는다(#35).
+- definer 무결성 트리거가 RLS WITH CHECK보다 먼저 돌면 23514와 42501 차이로 관계가 드러난다. 그 앞에 security invoker 트리거를 두고 `row_security_active(tg_relid)`일 때만 정책과 같은 기준으로 42501을 낸다. definer 함수 안에서는 current_user가 함수 주인이라 RLS가 걸리는지 알 수 없다. 같은 시점 트리거는 이름 알파벳 순으로 돈다(#38).
