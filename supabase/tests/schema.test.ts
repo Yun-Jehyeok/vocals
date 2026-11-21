@@ -3,14 +3,21 @@ import {
   ATTENDANCE_STATUSES,
   BUSINESS_TYPES,
   CANCELED_BY,
+  CHAT_MEMBER_LEFT_REASONS,
+  CHAT_MEMBER_ROLES,
+  CHAT_ROOM_TYPES,
   ENROLLMENT_SOURCES,
   LESSON_SESSION_KINDS,
   LESSON_SESSION_MODES,
   LESSON_SESSION_STATUSES,
   LESSON_TYPES,
+  MESSAGE_KINDS,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
+  PUSH_TOKEN_PLATFORMS,
   REFUND_REQUEST_STATUSES,
+  REPORT_STATUSES,
+  REPORT_TARGET_TYPES,
   TICKET_END_REASONS,
   TICKET_STATUSES,
   TICKET_TYPES,
@@ -83,11 +90,19 @@ const DOMAIN_ENUMS: Record<string, readonly string[]> = {
   videos_purpose: VIDEO_PURPOSES,
   videos_upload_status: VIDEO_UPLOAD_STATUSES,
   videos_visibility: VIDEO_VISIBILITIES,
+  // 이슈 #41
+  chat_rooms_type: CHAT_ROOM_TYPES,
+  chat_members_member_role: CHAT_MEMBER_ROLES,
+  chat_members_left_reason: CHAT_MEMBER_LEFT_REASONS,
+  messages_kind: MESSAGE_KINDS,
+  reports_target_type: REPORT_TARGET_TYPES,
+  reports_status: REPORT_STATUSES,
+  push_tokens_platform: PUSH_TOKEN_PLATFORMS,
 };
 
 /**
- * docs/erd.md 2·3·4·5·6장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다.
- * 4장은 이슈 #28·#32, 6장은 이슈 #28에서 만든 fee_policies만.
+ * docs/erd.md 2·3·4·5·6·7·8장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다.
+ * 4장은 이슈 #28·#32, 6장은 이슈 #28에서 만든 fee_policies만. 7·8장은 이슈 #41.
  */
 const ERD_COLUMNS: Record<string, string[]> = {
   users: ["id", "role", "nickname", "profile_image_url", "status", "created_at"],
@@ -234,6 +249,44 @@ const ERD_COLUMNS: Record<string, string[]> = {
   ],
   feedback_comments: ["id", "submission_id", "author_id", "body", "at_sec", "created_at"],
   trainer_profile_videos: ["id", "trainer_id", "video_id", "sort_order", "created_at"],
+  // 이슈 #41: erd 7·8장 (review_replies는 review_id가 PK)
+  chat_rooms: ["id", "type", "trainer_id", "created_at"],
+  chat_members: [
+    "id",
+    "room_id",
+    "user_id",
+    "member_role",
+    "muted",
+    "joined_at",
+    "left_at",
+    "left_reason",
+    "created_at",
+  ],
+  messages: ["id", "room_id", "sender_id", "kind", "body", "image_url", "hidden_by", "created_at"],
+  reviews: [
+    "id",
+    "trainer_id",
+    "student_id",
+    "ticket_id",
+    "body",
+    "hidden",
+    "updated_at",
+    "created_at",
+  ],
+  review_replies: ["review_id", "body", "created_at"],
+  blocks: ["id", "blocker_id", "blocked_id", "created_at"],
+  reports: [
+    "id",
+    "reporter_id",
+    "target_type",
+    "target_id",
+    "reason",
+    "status",
+    "handled_by",
+    "created_at",
+  ],
+  push_tokens: ["id", "user_id", "token", "platform", "created_at"],
+  notifications: ["id", "user_id", "type", "payload", "read_at", "created_at"],
 };
 
 describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
@@ -290,6 +343,12 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "homework_trainer_id",
       "is_homework_target",
       "can_read_homework_video",
+      // 이슈 #41
+      "is_current_room_member",
+      "room_joined_at",
+      "room_group_trainer_id",
+      "room_has_reported_message",
+      "has_blocked",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(true);
     }
@@ -305,6 +364,12 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "session_attendees_before_write",
       // 이슈 #38
       "authorize_client_insert",
+      // 이슈 #41
+      "chat_members_before_write",
+      "messages_before_write",
+      "reviews_before_write",
+      "reviews_set_updated_at",
+      "reports_before_write",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(false);
     }

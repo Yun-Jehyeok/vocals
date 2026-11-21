@@ -84,3 +84,31 @@ export type VideoVisibility = (typeof VIDEO_VISIBILITIES)[number];
 
 /** 영상 최대 길이(초) (HW-08, TRN-07: 5분). DB 제약 `videos_duration_sec_check`와 같다 */
 export const MAX_VIDEO_DURATION_SEC = 300;
+
+/** 채팅방 종류: 단체 채팅방(트레이너당 하나), 1:1 대화 (CHAT-01, DM-01). DB enum `chat_rooms_type` */
+export const CHAT_ROOM_TYPES = ["group", "direct"] as const;
+export type ChatRoomType = (typeof CHAT_ROOM_TYPES)[number];
+
+/** 채팅방 참여 역할. 단체 채팅방의 트레이너만 admin (CHAT-06). DB enum `chat_members_member_role` */
+export const CHAT_MEMBER_ROLES = ["admin", "member"] as const;
+export type ChatMemberRole = (typeof CHAT_MEMBER_ROLES)[number];
+
+/** 채팅방을 나간 이유: 스스로, 내보내짐, 수강권 종료 (CHAT-03, CHAT-06). DB enum `chat_members_left_reason` */
+export const CHAT_MEMBER_LEFT_REASONS = ["self", "kicked", "ticket_ended"] as const;
+export type ChatMemberLeftReason = (typeof CHAT_MEMBER_LEFT_REASONS)[number];
+
+/** 메시지 종류: 텍스트·사진만 (CHAT-05, DM-04). DB enum `messages_kind` */
+export const MESSAGE_KINDS = ["text", "image"] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+
+/** 신고 대상 (CHAT-07, DM-05, REV-05). DB enum `reports_target_type` */
+export const REPORT_TARGET_TYPES = ["message", "review", "user"] as const;
+export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number];
+
+/** 신고 처리 상태 (ADM-04). DB enum `reports_status` */
+export const REPORT_STATUSES = ["open", "resolved"] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+
+/** 푸시 기기 플랫폼 (NOTI-01). DB enum `push_tokens_platform` */
+export const PUSH_TOKEN_PLATFORMS = ["ios", "android"] as const;
+export type PushTokenPlatform = (typeof PUSH_TOKEN_PLATFORMS)[number];

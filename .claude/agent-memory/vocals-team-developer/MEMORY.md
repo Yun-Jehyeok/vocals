@@ -16,3 +16,6 @@
 - 새 테이블·enum을 만들면 `supabase/tests/schema.test.ts`의 `ERD_COLUMNS`·`DOMAIN_ENUMS`·실행 권한 목록, 테이블 단위 DELETE를 주면 `qa-boundaries.test.ts` 목록에 더한다(#35).
 - `gh issue view`·`gh pr view`는 GraphQL이라 403이다. `gh api repos/Yun-Jehyeok/vocals/issues/<n>`·`.../issues/<n>/comments`·`.../pulls/<n>`(REST)로 읽는다(#35).
 - definer 무결성 트리거가 RLS WITH CHECK보다 먼저 돌면 23514와 42501 차이로 관계가 드러난다. 그 앞에 security invoker 트리거를 두고 `row_security_active(tg_relid)`일 때만 정책과 같은 기준으로 42501을 낸다. definer 함수 안에서는 current_user가 함수 주인이라 RLS가 걸리는지 알 수 없다. 같은 시점 트리거는 이름 알파벳 순으로 돈다(#38).
+- WHERE가 있는 UPDATE는 새 행도 SELECT 정책을 통과해야 한다(Postgres가 SELECT 정책을 WITH CHECK로 더한다). 가리기·나가기처럼 값이 바뀐 뒤에도 쓴 사람이 그 행을 읽을 수 있는지 SELECT 정책과 함께 본다(#41).
+- "쓰는 사람이 그 대상을 읽을 수 있나"(신고 대상 등)는 security invoker인 `authorize_client_insert` 안에서 대상 테이블을 그냥 조회하면 쓰는 사람의 RLS가 그대로 걸린다. 판정을 따로 복제하지 않는다(#41).
+- 인수 테스트의 "준비 상태 확인"이 테이블 전체를 집계하면 seed 더미와 부딪칠 수 있다(#41: 신고된 메시지가 있는 방 목록). seed를 테스트에 맞춰 비우지 말고 `[질문] 받는 역할: QA`로 올린다(#41).
