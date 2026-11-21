@@ -23,3 +23,6 @@
 - 무결성 트리거를 security definer로 두면 BEFORE 트리거가 RLS보다 먼저 돌아 권한 없는 사람에게 오류 코드(23514 vs 42501)로 관계가 샌다. 반려 사유는 아니지만 판정 때 카탈로그(prosecdef·proconfig·실행 권한)와 함께 보고한다(#35).
 - 오류 코드 누출 점검: insert만 본다. update·delete는 RLS using이 먼저 행을 걸러 권한 없는 사람에게 트리거가 돌지 않는다(0행). 누출은 "남의 id를 본인 칸이 아닌 소유 칸(trainer_id·author_id·student_id)에 넣는" insert에서 난다. SQLSTATE를 그대로 돌려주는 로컬 `outcome()`으로 정확한 코드를 단언한다(#38).
 - 셸 표준 입력이나 heredoc에 마이그레이션 파일 이름이 들어가면 QA 훅이 그 파일을 고치는 것으로 읽고 막는다. PR·리뷰 글은 Write 도구로 파일을 만들어 `-F body=@파일`로 보낸다(#38).
+- fixture SQL은 `supabase/tests/scratch/`의 임시 테스트에서 앞 묶음 DB에 임시 DDL을 `db.exec`로 넣고 FIXTURE_SQL(export)과 준비 작업을 돌려 미리 검증할 수 있다(마이그레이션 파일을 쓰지 않아 훅에 안 막힌다). 돌린 뒤 scratch는 지운다(#41).
+- beforeAll(fixture)이 실패하면 vitest는 그 파일 테스트를 failed가 아니라 skipped로 센다. 개발 전 결과는 "failed + skipped / 전체"로 적는다(#41).
+- 쓴 사람 컬럼이 없는 테이블(review_replies)의 "그 사람이 아니면 서버 insert도 실패" 조건은 service_role에 auth.uid()가 없어 DB가 판정할 수 없다. 테스트로 쓰지 않고 기획에 묻는다(#41).
