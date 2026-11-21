@@ -12,3 +12,7 @@
 - 판정 때 개발이 QA의 일반 테스트(qa-boundaries 등)를 고쳤으면 `git diff -U0 origin/main...HEAD -- <파일> | grep '^-'`로 지운 단언만 보고, 허용 목록이 정확히 일치(toEqual)로 남았는지와 늘어난 항목이 결정 범위인지 확인한다(#28).
 - 배정·삭제 제한은 "풀기(null)"로 우회되는지도 본다. 완료 조건 밖이면 반려하지 않고 기획에 묻는다(#28 반 배정 해제 → 반 삭제).
 - 판정용 일회성 시도는 `supabase/tests/scratch/`에 잠깐 두고 돌린 뒤 지운다. vitest 콘솔 출력은 grep에 안 잡히므로 값은 `expect(x).toBe("show")` 실패 메시지로 본다.
+- 앞 묶음 버그 수정(#31)처럼 기존 테이블만 쓰는 조건은 새 묶음 fixture와 파일을 나눠 앞 묶음 fixture(`createBundle2Db`)로 쓴다. 새 테이블이 없어도 돌아서 개발 전에 "버그 칸만 실패, 허용 짝은 통과"를 확인할 수 있다(#32).
+- 여러 단계 우회(배정 해제 → 반 삭제)는 `withActor` 안에서 단계마다 `savepoint`/`rollback to savepoint`로 시도하고 단계별 영향 행 수를 함께 단언한다(#32).
+- fixture SQL 검증: /tmp 복사본 seed에 임시 DDL을 붙여 준비 데이터가 들어가는지만 본다. 복사본에서 `cd` 뒤 상대 경로로 seed를 쓰거나 `.claude/logs`에 쓰면 QA 훅이 막는다. 막히면 다시 시도하지 않고, 복사본에 남은 차단 로그는 보고에 적는다(레포 로그는 훅이 직접 쓰므로 그것만 커밋)(#32).
+- 정책 본문 검사는 "private 함수를 부른다"까지 요구하지 않는다(#28 refund_requests처럼 다른 테이블 RLS를 거치는 exists도 허용). "enrollments·tickets·group_classes 직접 조회 없음"만 본다(#32).
