@@ -1,3 +1,4 @@
 {"ts":"2026-11-21T04:58:17.894Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"tests/acceptance/"}
 {"ts":"2026-11-21T05:08:01.002Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"supabase/migrations/"}
 {"ts":"2026-11-21T05:39:15.459Z","session":"673715e8","event":"block","rule":"qa.scope","role":"qa","tool":"Write","target":"supabase/migrations/20261122000000_bundle2.sql"}
+{"ts":"2026-11-21T10:23:17.436Z","session":"673715e8","event":"block","rule":"planner.scope","role":"planner","tool":"Bash","target":"packages/shared"}
