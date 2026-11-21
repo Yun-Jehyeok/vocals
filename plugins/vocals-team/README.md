@@ -39,7 +39,7 @@
 
 Bash 해석(`lib/shell.mjs`):
 
-- 리다이렉트, tee, sed -i, perl -i, awk -i inplace, ex/vi/ed, cp/mv/install/ln/rsync, rm, touch, truncate, dd, tar -x, unzip, patch·`git apply`(패치 파일을 읽음), `git mv/rm`, `git checkout <커밋> -- 경로`, `git restore --source`, find -delete, `bash -c`·eval, `node -e`·`python -c`, `{a,b}`와 glob을 푼다. `ln`은 링크가 가리키는 곳도 본다.
+- 리다이렉트, tee, sed -i, perl -i, awk -i inplace, ex/vi/ed, cp/mv/install/ln/rsync, rm, touch, truncate, dd, tar -x, unzip, patch·`git apply`(패치 파일을 읽음), `git mv/rm`, `git checkout <커밋> -- 경로`, `git restore --source`, find -delete, `bash -c`·eval, `node -e`·`python -c`, 인터프리터·셸의 표준 입력 코드(`python3 - <<'EOF'`, `node <<EOF`, `<<<`, `< 파일`, `echo … | node`), `{a,b}`와 glob을 푼다. `ln`과 `cp -l/-s`는 링크가 가리키는 곳도 본다.
 - HEAD·index로 되돌리는 `git restore 경로`·`git checkout -- 경로`는 막지 않는다(커밋된 내용으로 돌아갈 뿐).
 - 풀 수 없는 쓰기(스크립트 실행, xargs, pnpm/npx, 변수 경로, `$(…)`로 이동한 cd 등)가 보호 경로 문자열(docs/, 인수 테스트, 마이그레이션 디렉터리)과 한 명령에 있으면 developer는 보수적으로 막는다.
 - QA가 아닌 역할: 명령 어디든 `Acceptance:`가 있으면 막는다. `-t/--template`, `-c core.editor`·`GIT_EDITOR`·`EDITOR`, `trailer.*` 설정, `interpret-trailers`, `-m` 안의 `$(…)`·백틱, 같은 명령에서 만든 `-F` 파일, Co-Authored-By·Claude-Session 밖의 `--trailer`, 트레일러가 있는 커밋의 `-C`·`--amend --no-edit`도 막는다. 커밋 메시지는 `git commit -F - <<'EOF' … EOF`로 쓴다.

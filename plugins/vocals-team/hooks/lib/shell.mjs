@@ -12,14 +12,16 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /**
- * @typedef {{ words: string[], redirects: { op: string, target: string }[], heredocs: string[] }} Segment
+ * @typedef {{ words: string[], redirects: { op: string, target: string }[], heredocs: string[], pipeIn: boolean }} Segment
+ *   pipeIn: 앞 세그먼트와 파이프(|)로 이어져 표준 입력을 받는다
  * @typedef {{ path: string, kind: "write" | "tree", via: string }} Target
  *   kind: write = 그 경로 하나를 쓴다, tree = 그 경로와 아래 전체를 바꾸거나 지운다
  * @typedef {{ cwd: string, sub: string, args: string[], heredocs: string[], raw: string, config: string[], env: string[] }} CommitCall
  * @typedef {{ cwd: string, args: string[] }} PushCall
  */
 
-const newSegment = () => /** @type {Segment} */ ({ words: [], redirects: [], heredocs: [] });
+const newSegment = () =>
+  /** @type {Segment} */ ({ words: [], redirects: [], heredocs: [], pipeIn: false });
 
 /** src[start]가 "("일 때 짝이 맞는 ")" 다음 위치. 따옴표와 heredoc 본문은 건너뛴다. */
 function skipBalanced(src, start) {
@@ -209,7 +211,9 @@ export function parseShell(src) {
       pendingRedirect = op;
     } else if (c === ";" || c === "&" || c === "|" || c === "(" || c === ")") {
       endSegment();
-      i += (c === "&" && next === "&") || (c === "|" && (next === "|" || next === "&")) ? 2 : 1;
+      const double = (c === "&" && next === "&") || (c === "|" && (next === "|" || next === "&"));
+      if (c === "|" && next !== "|") seg.pipeIn = true;
+      i += double ? 2 : 1;
     } else {
       word += c;
       inWord = true;
@@ -426,6 +430,36 @@ const RUNNERS = new Set([
 ]);
 
 /**
+ * 인터프리터가 표준 입력으로 받는 코드: heredoc(<<), here-string(<<<), 입력 리다이렉트(< 파일),
+ * 앞 세그먼트에서 파이프로 넘어온 heredoc·echo/printf 인자·cat 파일.
+ * @param {Segment} seg
+ * @param {Segment | null} prev
+ * @param {string} dir
+ */
+function stdinCode(seg, prev, dir) {
+  const read = (file) => {
+    try {
+      return dynamic(file) ? "" : readFileSync(resolve(dir, file), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const out = [...seg.heredocs];
+  for (const redirect of seg.redirects) {
+    if (redirect.op === "<<<") out.push(redirect.target);
+    else if (redirect.op === "<") out.push(read(redirect.target));
+  }
+  if (seg.pipeIn && prev) {
+    out.push(...prev.heredocs);
+    const words = stripPrefix(prev.words);
+    const name = basename(words[0] ?? "");
+    if (name === "echo" || name === "printf") out.push(words.slice(1).join(" "));
+    else if (name === "cat") for (const file of positional(words.slice(1))) out.push(read(file));
+  }
+  return out.filter(Boolean);
+}
+
+/**
  * Bash 명령을 분석한다.
  * @param {string} command
  * @param {string} cwd 명령을 실행하는 디렉터리
@@ -475,6 +509,12 @@ export function analyzeCommand(command, cwd, depth = 0) {
         i++;
       } else if (!a.startsWith("-")) rest.push(a);
     }
+    // cp -l(하드 링크)·-s(심볼릭 링크)는 ln과 같이 원본도 본다
+    const linkCopy =
+      name === "cp" &&
+      args.some(
+        (a) => /^-[a-zA-Z]*[ls][a-zA-Z]*$/.test(a) || a === "--link" || a === "--symbolic-link",
+      );
     const sources = targetDir ? rest : rest.slice(0, -1);
     const dest = targetDir ?? rest.at(-1);
     if (!dest || sources.length === 0) return;
@@ -487,7 +527,7 @@ export function analyzeCommand(command, cwd, depth = 0) {
       const into = name === "rsync" ? dest : destIsDir ? join(dest, basename(source)) : dest;
       add(into, "tree", name, base);
       if (name === "mv") add(source, "tree", name, base);
-      if (name === "ln") {
+      if (name === "ln" || linkCopy) {
         // 링크로 보호 경로를 다른 이름으로 열지 못하게 링크 원본도 검사한다
         add(source, "tree", "ln 원본", base);
         if (!isAbsolute(source)) add(source, "tree", "ln 원본", resolve(base, dirname(dest)));
@@ -495,7 +535,11 @@ export function analyzeCommand(command, cwd, depth = 0) {
     }
   };
 
+  /** @type {Segment | null} */
+  let prev = null;
   for (const seg of parseShell(command)) {
+    const previous = prev;
+    prev = seg;
     for (const redirect of seg.redirects) {
       if (!["&>>", "&>", ">>", ">|", ">", "<>", ">&"].includes(redirect.op)) continue;
       if (redirect.op === ">&" && /^(\d+|-)$/.test(redirect.target)) continue;
@@ -667,7 +711,12 @@ export function analyzeCommand(command, cwd, depth = 0) {
         if (inPlace) for (const p of hasCode ? files : files.slice(1)) add(p, "write", "perl -i");
         else if (hasCode)
           for (const code of codes) for (const p of inlineCodeTargets(code)) add(p, "write", name);
-        else if (files.length > 0) opaque.push(`perl ${files[0]}`);
+        else if (files.length > 0 && files[0] !== "-") opaque.push(`perl ${files[0]}`);
+        else {
+          for (const code of stdinCode(seg, previous, dir)) {
+            for (const p of inlineCodeTargets(code)) add(p, "write", `${name} 표준 입력`);
+          }
+        }
         break;
       }
       case "node":
@@ -684,8 +733,15 @@ export function analyzeCommand(command, cwd, depth = 0) {
             for (const p of inlineCodeTargets(args[i + 1] ?? "")) add(p, "write", name);
           }
         }
-        if (!hasCode && args.some((a) => !a.startsWith("-"))) opaque.push(`${name} 스크립트`);
+        const script = positional(args).find((a) => a !== "-");
+        if (!hasCode && script) opaque.push(`${name} 스크립트`);
         else if (args.includes("-m")) opaque.push(`${name} -m`);
+        else if (!hasCode) {
+          // python3 - <<'EOF', node <<'EOF', echo '…' | python3 같은 표준 입력 코드도 -c/-e처럼 본다
+          for (const code of stdinCode(seg, previous, dir)) {
+            for (const p of inlineCodeTargets(code)) add(p, "write", `${name} 표준 입력`);
+          }
+        }
         break;
       }
       case "find": {
@@ -715,8 +771,17 @@ export function analyzeCommand(command, cwd, depth = 0) {
           commits.push(...inner.commits);
           pushes.push(...inner.pushes);
           opaque.push(...inner.opaque);
-        } else if (index === -1 && args.some((a) => !a.startsWith("-"))) {
+        } else if (index === -1 && positional(args).some((a) => a !== "-")) {
           opaque.push(`${name} 스크립트`);
+        } else if (index === -1 && depth < 3) {
+          // bash <<'EOF', bash -s < x.sh, echo '…' | sh: 표준 입력의 명령도 분석한다
+          for (const code of stdinCode(seg, previous, dir)) {
+            const inner = analyzeCommand(code, dir, depth + 1);
+            targets.push(...inner.targets);
+            commits.push(...inner.commits);
+            pushes.push(...inner.pushes);
+            opaque.push(...inner.opaque);
+          }
         }
         break;
       }

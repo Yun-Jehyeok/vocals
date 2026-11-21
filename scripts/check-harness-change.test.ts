@@ -75,6 +75,10 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
       "plugins/vocals-team/hooks/lib/rules.mjs",
       "plugins/vocals-team/.claude-plugin/plugin.json",
       "pnpm-workspace.yaml",
+      "supabase/vitest.config.ts",
+      "packages/shared/vitest.config.ts",
+      "apps/admin/vitest.config.mts",
+      "vitest.workspace.ts",
     ]) {
       expect(isHarnessPath(file)).toBe(true);
     }
@@ -85,6 +89,7 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
       "supabase/migrations/1.sql",
       "supabase/seed.sql",
       "plugins/vocals-team/agents/qa.md",
+      "packages/shared/src/vitest.config.helper.ts",
     ]) {
       expect(isHarnessPath(file)).toBe(false);
     }
@@ -130,5 +135,17 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
   it("기준 브랜치가 없으면 경고만 하고, --strict면 실패한다", () => {
     expect(check([], { base: "origin/nope" }).status).toBe("skip");
     expect(check([], { base: "origin/nope", strict: true }).status).toBe("fail");
+  });
+});
+
+describe("테스트 범위 설정 (이슈 #17 2단계 후속)", () => {
+  it("새로 만든 vitest 설정도 하네스 변경으로 보고 라벨이 없으면 실패한다", () => {
+    commit("chore: 테스트 범위", {
+      "packages/shared/vitest.config.ts":
+        "export default { test: { include: ['src/a.test.ts'] } };",
+    });
+    const result = check([]);
+    expect(result.status).toBe("fail");
+    expect(result.files).toEqual(["packages/shared/vitest.config.ts"]);
   });
 });
