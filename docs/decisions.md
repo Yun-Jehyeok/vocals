@@ -12,6 +12,10 @@ PM과 팀장이 정한 것을 한 줄씩 모은다. 요구사항 문장은 `docs
 
 | 날짜 | 결정 | 이유 | 되돌릴 수 있음 | 결정한 사람 | 출처 |
 | --- | --- | --- | --- | --- | --- |
+| 2026-11-21 | 하네스 주간 보고를 예약 작업으로 매주 토 09:45 KST에 `pnpm harness:report` 결과를 #17 댓글로 남긴다(첫 실행 2026-11-28) | 차단·반려·CI 실패 추이를 정기적으로 보려고 | 예 | 팀장 | [#17](https://github.com/Yun-Jehyeok/vocals/issues/17) |
+| 2026-11-21 | 서브에이전트 worktree 격리는 클라우드에서 권한으로 막혀 있으므로 developer frontmatter의 `isolation`을 빼고, 병렬 작업은 수동 `git worktree add /tmp/wt-<이슈>`로 한다 | `isolation: worktree`로 띄우면 권한 거부, 동기화되면 developer 실행이 막힐 위험 | 예 | 팀장 | [#17](https://github.com/Yun-Jehyeok/vocals/issues/17), [PR #25](https://github.com/Yun-Jehyeok/vocals/pull/25) |
+| 2026-11-21 | 트레일러가 본문에 붙어 git 트레일러로 인식되지 않은 커밋(ce4853a)은 강제 push로 고치지 않고 둔다. 이후 지시는 "본문과 트레일러 사이 빈 줄 하나, 트레일러끼리는 빈 줄 없이"로 쓴다 | 기능 영향 없음, 강제 push 금지 | 아니오 | 팀장 | [#17](https://github.com/Yun-Jehyeok/vocals/issues/17), [PR #24](https://github.com/Yun-Jehyeok/vocals/pull/24) |
+| 2026-11-21 | `.claude/agent-memory/`와 `.claude/logs/`는 `harness` 라벨 검사에서 제외한다. 메모리 내용은 팀장이 merge 요청 전 PR diff로 확인한다 | 평소 작업 PR에서 바뀌는 파일이라 라벨을 매번 요구할 수 없음 | 예 | 팀장 | [#17](https://github.com/Yun-Jehyeok/vocals/issues/17), [PR #23](https://github.com/Yun-Jehyeok/vocals/pull/23), [PR #25](https://github.com/Yun-Jehyeok/vocals/pull/25) |
 | 2026-11-21 | `docs/`는 CI로 보호하지 않고, 팀장이 merge 요청 전에 PR 파일 목록을 확인한다 | docs 변경은 기획 담당의 정상 작업이라 CI로 막을 수 없음 | 예 | 팀장 | [#17](https://github.com/Yun-Jehyeok/vocals/issues/17) |
 | 2026-11-21 | `harness-change` 검사를 main 규칙 세트의 필수 검사로 지정(설정은 PM이 GitHub Rulesets에서) | 하네스 변경이 라벨 없이 merge되지 않게 | 예 | PM | [#17](https://github.com/Yun-Jehyeok/vocals/issues/17) |
 | 2026-11-21 | 하네스 자체 수정은 CODEOWNERS 대신 `harness` 라벨 CI 검사로 통제, 라벨은 팀장이 붙인다 | 추천안 C(CI 표시) 채택 | 예 | PM | [#17](https://github.com/Yun-Jehyeok/vocals/issues/17), [PR #20](https://github.com/Yun-Jehyeok/vocals/pull/20) |
