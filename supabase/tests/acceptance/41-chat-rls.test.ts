@@ -614,13 +614,16 @@ describe("#41 준비 상태 확인 — ADM-02, AUTH-07, ADM-07", () => {
     }
   });
 
+  // seed(개발 담당)에도 메시지 신고가 있으므로 준비 데이터의 방 4개로 좁혀 본다(신고자는 seed·준비 데이터 누구든)
   it("ADM-07: 준비 데이터에서 방1·DM2에는 신고된 메시지가 있고 방2·DM1에는 없다", async () => {
     const { rows } = await queryAs<{ room_id: string }>(
       db,
       service,
       `select distinct m.room_id from public.reports r
        join public.messages m on m.id = r.target_id
-       where r.target_type = 'message' order by m.room_id`,
+       where r.target_type = 'message' and m.room_id = any($1::uuid[])
+       order by m.room_id`,
+      [[ROOM.R1, ROOM.R2, ROOM.DM1, ROOM.DM2]],
     );
     expect(rows.map((row) => row.room_id).sort()).toEqual([ROOM.R1, ROOM.DM2].sort());
   });
