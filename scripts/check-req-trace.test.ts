@@ -127,6 +127,12 @@ describe("요구사항 추적 래칫 (이슈 #17)", () => {
     expect(trace(root, []).covered).toEqual([]);
   });
 
+  it("서브에이전트 worktree(.claude/worktrees/)의 테스트는 세지 않는다", () => {
+    write(".claude/worktrees/agent-1/pkg/a.test.ts", 'it("XYZ-01", () => {});');
+    write("pkg/.claude/worktrees/b.test.ts", 'it("XYZ-02", () => {});');
+    expect(trace(root, []).covered).toEqual(["XYZ-02"]);
+  });
+
   it("describe 이름의 ID도 인정하고, ID 경계를 지킨다 (XYZ-010은 XYZ-01이 아님)", () => {
     write("pkg/a.spec.tsx", 'describe("XYZ-02(확정)", () => {});\nit("XYZ-010", () => {});');
     expect(trace(root, []).covered).toEqual(["XYZ-02"]);
