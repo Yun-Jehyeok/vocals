@@ -47,8 +47,25 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export const REFUND_REQUEST_STATUSES = ["requested", "processed"] as const;
 export type RefundRequestStatus = (typeof REFUND_REQUEST_STATUSES)[number];
 
+/** 회차 종류: 정기(고정 일정에서 생김), 일회권, 보강 (SCH-01, SCH-02, SCH-08). DB enum `lesson_sessions_kind` */
+export const LESSON_SESSION_KINDS = ["regular", "single", "makeup"] as const;
+export type LessonSessionKind = (typeof LESSON_SESSION_KINDS)[number];
+
+/** 수업 방식. 1단계는 offline만 쓴다(erd 9장, online은 2단계 대비). DB enum `lesson_sessions_mode` */
+export const LESSON_SESSION_MODES = ["offline", "online"] as const;
+export type LessonSessionMode = (typeof LESSON_SESSION_MODES)[number];
+
+/** 회차 상태 (SCH-06). DB enum `lesson_sessions_status` */
+export const LESSON_SESSION_STATUSES = ["scheduled", "canceled"] as const;
+export type LessonSessionStatus = (typeof LESSON_SESSION_STATUSES)[number];
+
+/** 출결 상태 (ATT-01). DB enum `session_attendees_attendance` */
 export const ATTENDANCE_STATUSES = ["none", "present", "absent", "pre_canceled", "makeup"] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
+/** 사전 취소한 사람 (SCH-05, SCH-06). DB enum `session_attendees_canceled_by` */
+export const CANCELED_BY = ["student", "trainer"] as const;
+export type CanceledBy = (typeof CANCELED_BY)[number];
 
 export const BUSINESS_TYPES = ["individual", "sole_proprietor", "corporation"] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];

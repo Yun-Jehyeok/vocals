@@ -1,7 +1,12 @@
 import type { PGlite, Transaction } from "@electric-sql/pglite";
 import {
+  ATTENDANCE_STATUSES,
   BUSINESS_TYPES,
+  CANCELED_BY,
   ENROLLMENT_SOURCES,
+  LESSON_SESSION_KINDS,
+  LESSON_SESSION_MODES,
+  LESSON_SESSION_STATUSES,
   LESSON_TYPES,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
@@ -66,11 +71,16 @@ const DOMAIN_ENUMS: Record<string, readonly string[]> = {
   tickets_end_reason: TICKET_END_REASONS,
   refund_requests_status: REFUND_REQUEST_STATUSES,
   fee_policies_source: ENROLLMENT_SOURCES,
+  lesson_sessions_kind: LESSON_SESSION_KINDS,
+  lesson_sessions_mode: LESSON_SESSION_MODES,
+  lesson_sessions_status: LESSON_SESSION_STATUSES,
+  session_attendees_attendance: ATTENDANCE_STATUSES,
+  session_attendees_canceled_by: CANCELED_BY,
 };
 
 /**
  * docs/erd.md 2·3·4·6장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다.
- * 4·6장은 이슈 #28에서 만든 group_classes, fee_policies만.
+ * 4장은 이슈 #28·#32, 6장은 이슈 #28에서 만든 fee_policies만.
  */
 const ERD_COLUMNS: Record<string, string[]> = {
   users: ["id", "role", "nickname", "profile_image_url", "status", "created_at"],
@@ -155,6 +165,39 @@ const ERD_COLUMNS: Record<string, string[]> = {
   ],
   group_classes: ["id", "trainer_id", "name", "capacity", "duration_min", "created_at"],
   fee_policies: ["id", "source", "rate", "effective_from", "created_at"],
+  fixed_schedules: [
+    "id",
+    "ticket_id",
+    "group_class_id",
+    "effective_from",
+    "effective_to",
+    "created_at",
+  ],
+  fixed_schedule_slots: ["id", "fixed_schedule_id", "weekday", "start_time", "created_at"],
+  lesson_sessions: [
+    "id",
+    "trainer_id",
+    "group_class_id",
+    "fixed_schedule_id",
+    "kind",
+    "mode",
+    "starts_at",
+    "ends_at",
+    "status",
+    "created_at",
+  ],
+  session_attendees: [
+    "id",
+    "session_id",
+    "ticket_id",
+    "student_id",
+    "attendance",
+    "canceled_by",
+    "deducted",
+    "session_amount",
+    "checked_at",
+    "created_at",
+  ],
 };
 
 describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
@@ -200,6 +243,13 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "is_assigned_to_group_class",
       "group_class_student_count",
       "can_request_refund",
+      // 이슈 #32
+      "is_ticket_member",
+      "fixed_schedule_trainer_id",
+      "fixed_schedule_group_class_id",
+      "lesson_session_trainer_id",
+      "is_session_attendee",
+      "session_has_deducted_attendee",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(true);
     }
@@ -209,6 +259,10 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "lesson_products_before_update",
       "group_classes_before_update",
       "tickets_before_write",
+      "fixed_schedules_before_write",
+      "lesson_sessions_before_write",
+      "lesson_sessions_before_delete",
+      "session_attendees_before_write",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(false);
     }
