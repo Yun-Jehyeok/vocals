@@ -3,7 +3,7 @@
 // 전역(메인 세션 포함): .env 수정 금지, 기존 마이그레이션(main에 이미 있는 supabase/migrations/*) 수정·삭제 금지.
 // 역할별(서브에이전트에서만, 메인 세션=팀장은 역할 차단 없음):
 //   developer  docs/, 인수 테스트·판정 헬퍼(scripts/acceptance-guard.ts의 PROTECTED_PATHS) 수정 금지
-//   qa         테스트 파일과 요구사항 추적 기준선 밖 수정 금지
+//   qa         테스트 파일, 요구사항 추적 기준선, QA 메모리(.claude/agent-memory/…qa/) 밖 수정 금지
 //   planner    docs/와 팀 규칙 문서(CLAUDE.md, .claude/rules/, 플러그인 md) 밖 수정 금지
 //   designer   코드 경로(apps/, packages/, supabase/, scripts/) 수정 금지
 // 규칙은 vocals 레포(루트에 plugins/vocals-team이 있는 git 저장소, worktree 포함) 안의 경로에만 적용한다.
@@ -87,11 +87,32 @@ const MESSAGES = {
     instead:
       "테스트(`*.test.ts`, `supabase/tests/`, `tests/`)로 재현하고 `[질문] 받는 역할: 개발`로 보고하세요. 문서 문제는 `[질문] 받는 역할: 기획`.",
   },
+  qaDocs: {
+    summary: "QA는 테스트 파일과 요구사항 추적 기준선만 바꿉니다.",
+    why: "문서는 기획 담당입니다. 문서가 판정 기준이라 QA가 고치면 기준을 스스로 바꾸는 셈입니다.",
+    instead: "문서가 틀렸거나 모호하다고 보면 `[질문] 받는 역할: 기획`으로 보고하세요.",
+  },
+  qaSeed: {
+    summary: "QA는 테스트 파일과 요구사항 추적 기준선만 바꿉니다.",
+    why: "seed(더미 데이터)는 개발 담당입니다. 개발이 바꾸고 QA는 판정으로 확인합니다(CLAUDE.md 훅과 CI).",
+    instead:
+      "테스트에 필요한 데이터는 테스트 안에서 만들고, seed 변경이 필요하면 `[질문] 받는 역할: 개발`로 보고하세요.",
+  },
+  qaHarness: {
+    summary: "QA는 테스트 파일과 요구사항 추적 기준선만 바꿉니다.",
+    why: "CI·훅·검사 스크립트(하네스)는 개발이 바꾸고 팀장이 `harness` 라벨로 확인합니다.",
+    instead: "검사가 틀렸다고 보면 [보고]에 적어 팀장에게 넘기세요.",
+  },
   planner: {
     summary: "기획은 docs/와 팀 규칙 문서(CLAUDE.md, .claude/rules/, 플러그인 md)만 바꿉니다.",
     why: "코드와 설정은 개발 담당입니다.",
     instead:
       "필요한 변경을 이슈의 완료 조건·데이터 변경에 적고, [보고]에서 개발에 맡길 일로 넘기세요.",
+  },
+  plannerHarness: {
+    summary: "기획은 docs/와 팀 규칙 문서(CLAUDE.md, .claude/rules/, 플러그인 md)만 바꿉니다.",
+    why: "CI·훅·검사 스크립트(하네스)는 개발이 바꾸고 팀장이 `harness` 라벨로 확인합니다. CI 변경은 PM 승인 항목입니다.",
+    instead: "필요한 변경을 [보고]에 적어 팀장에게 넘기세요.",
   },
   designer: {
     summary: "코드(apps/, packages/, supabase/, scripts/)는 개발 담당입니다.",
@@ -185,18 +206,48 @@ export function touches(file, area, kind) {
   return inside || ancestor;
 }
 
+/** 하네스(훅·CI·검사 스크립트·로컬 설정) 경로. scripts/check-harness-change.ts의 HARNESS_PATHS 요약 */
+const HARNESS_AREAS = [".github/", "scripts/", ".claude/", ".claude-plugin/", "plugins/"];
+/** QA 에이전트의 프로젝트 메모리(`memory: project`). 플러그인 에이전트는 이름에 접두어가 붙을 수 있다 */
+const QA_MEMORY = /^\.claude\/agent-memory\/(?:[^/]*[^a-z0-9/])?qa\//;
+
 const ALLOWED = {
   qa: (file) =>
     TEST_FILE.test(file) ||
     touches(file, "supabase/tests/", "write") ||
     touches(file, "tests/", "write") ||
-    file === "scripts/req-trace-baseline.txt",
+    file === "scripts/req-trace-baseline.txt" ||
+    QA_MEMORY.test(file),
   planner: (file) =>
     touches(file, "docs/", "write") ||
     file === "claude.md" ||
     touches(file, ".claude/rules/", "write") ||
     (file.startsWith("plugins/vocals-team/") && file.endsWith(".md")),
 };
+
+/**
+ * 차단 대상에 맞는 "왜"를 고른다. 예: QA가 docs/를 고치면 "문서는 기획 담당", seed면 "seed는 개발 담당".
+ * @param {"qa" | "planner"} role
+ * @param {string} file 저장소 기준 상대 경로(소문자)
+ * @param {Kind} kind
+ */
+function roleMessage(role, file, kind) {
+  const inAny = (areas) => areas.some((area) => touches(file, area, kind));
+  const harness = inAny(HARNESS_AREAS) && !file.endsWith(".md");
+  if (role === "planner") return harness ? MESSAGES.plannerHarness : MESSAGES.planner;
+  if (
+    inAny(["docs/", ".claude/rules/"]) ||
+    file === "claude.md" ||
+    (file.startsWith("plugins/") && file.endsWith(".md"))
+  ) {
+    return MESSAGES.qaDocs;
+  }
+  if (/^supabase\/seed[^/]*(\.sql)?$/.test(file) || touches(file, "supabase/seed/", kind)) {
+    return MESSAGES.qaSeed;
+  }
+  if (harness) return MESSAGES.qaHarness;
+  return MESSAGES.qa;
+}
 
 /**
  * 명령 문자열에 보호 경로(docs/, 인수 테스트·판정 헬퍼, 마이그레이션 디렉터리)가 나오는가.
@@ -278,7 +329,7 @@ export class PathRules {
         return null;
       case "qa":
       case "planner":
-        return ALLOWED[this.role](file) ? null : hit(MESSAGES[this.role]);
+        return ALLOWED[this.role](file) ? null : hit(roleMessage(this.role, file, kind));
       default:
         return null;
     }

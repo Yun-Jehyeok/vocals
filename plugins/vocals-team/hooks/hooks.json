@@ -1,6 +1,17 @@
 {
-  "description": "vocals 하네스(이슈 #17): 역할별 파일 쓰기 차단, 되돌리기 어려운 명령 차단, 위험한 Supabase MCP 도구 차단",
+  "description": "vocals 하네스(이슈 #17): 역할별 파일 쓰기 차단, 되돌리기 어려운 명령 차단, 위험한 Supabase MCP 도구 차단, 팀장 세션 시작 현황",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-context.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",

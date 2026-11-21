@@ -31,9 +31,15 @@ export const HARNESS_PATHS = [
 export const HARNESS_FILE_PATTERNS = [/(^|\/)vitest\.(config|workspace)\.[cm]?[jt]s$/] as const;
 /** 하네스 디렉터리 안이지만 평소 작업에서 바뀌는 파일 */
 export const HARNESS_EXCLUDE = ["scripts/req-trace-baseline.txt"] as const;
+/**
+ * 하네스 디렉터리 안이지만 평소 작업에서 바뀌는 디렉터리: 개발·QA 에이전트의 프로젝트 메모리(`memory: project`).
+ * 작업 PR에 같이 커밋한다(이슈 #17 3단계). 내용은 PR diff로 리뷰한다.
+ */
+export const HARNESS_EXCLUDE_DIRS = [".claude/agent-memory/"] as const;
 
 export function isHarnessPath(file: string): boolean {
   if ((HARNESS_EXCLUDE as readonly string[]).includes(file)) return false;
+  if (HARNESS_EXCLUDE_DIRS.some((dir) => file.startsWith(dir))) return false;
   if (HARNESS_FILE_PATTERNS.some((pattern) => pattern.test(file))) return true;
   return HARNESS_PATHS.some((area) => (area.endsWith("/") ? file.startsWith(area) : file === area));
 }
