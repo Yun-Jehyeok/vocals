@@ -49,11 +49,21 @@ Bash 해석(`lib/shell.mjs`):
 
 운영:
 
-- 훅 단위 테스트: `scripts/plugin-hooks.test.ts`, `scripts/session-context.test.ts`(`pnpm test`). 규칙을 바꾸면 표에 줄을 더한다.
+- 훅 단위 테스트: `scripts/plugin-hooks.test.ts`, `scripts/session-context.test.ts`, `scripts/hook-log.test.ts`(`pnpm test`). 규칙을 바꾸면 표에 줄을 더한다.
 - 차단 메시지의 "왜"는 대상에 맞춘다(예: QA가 문서 → 기획 담당, seed → 개발 담당, 하네스 → 팀장 라벨).
 - 로컬 `.claude/settings.json`의 PreToolUse 훅은 이 스크립트를 레포 경로(`$CLAUDE_PROJECT_DIR/plugins/vocals-team/hooks/`)에서 직접 부른다. 그래서 로컬은 항상 작업 트리의 최신 규칙을 쓴다. 플러그인 훅(마켓플레이스 캐시)과 둘 다 돌아도 판정이 같다.
 - 이 디렉터리를 바꾸는 PR은 `harness` 라벨이 있어야 CI를 통과한다(`scripts/check-harness-change.ts`).
 - 훅이 클라우드 스레드에서 실제로 도는지는 플러그인을 켠 새 세션에서 QA가 실측한다(#17 2단계 검증).
+
+## 차단 로그 (`lib/log.mjs`, 이슈 #17 6단계)
+
+- 훅이 막을 때마다(`lib/io.mjs`의 `block`) `.claude/logs/<YYYY-MM-DD>-<세션 앞 8자>.jsonl`에 한 줄을 더한다. 날짜는 UTC, 세션은 훅 입력 `session_id`에서 `session_` 접두어와 영숫자가 아닌 글자를 뺀 앞 8자.
+- 필드: `ts`, `session`, `event`(`block`), `rule`(규칙 id), `role`(`developer`·`qa`·`planner`·`designer`, 다른 에이전트는 `agent_type` 그대로, 메인 세션은 `main`), `tool`, `target`(저장소 기준 경로, MCP 도구 이름, 경로가 없는 명령 규칙은 `null`).
+- **명령 원문·파일 내용·도구 인자 값은 남기지 않는다.** 저장소 밖 절대 경로는 파일 이름만 남긴다.
+- 쓰는 곳: 훅이 판단한 저장소 루트. 파일 규칙은 대상 파일의 저장소, 명령 규칙은 명령의 작업 디렉터리 — 수동 worktree(`/tmp/wt-<이슈번호>`)면 그 worktree다. vocals 저장소를 못 찾으면 남기지 않는다. 쓰기 실패는 무시한다(차단은 그대로).
+- 규칙 id는 `lib/log.mjs`의 `RULE_IDS`가 목록이다. 새 차단을 더하면 `block({ rule: "…" })`과 목록에 같이 더한다(`scripts/hook-log.test.ts`가 둘이 같은지 본다). id를 바꾸면 지난 로그와 집계가 끊긴다.
+- 클라우드는 세션이 끝나면 파일이 사라져서 팀장이 작업 PR에 커밋한다(PM 결정 2026-11-20, team-lead 스킬 6장). `.gitignore`에 넣지 않고, `check-harness-change`는 이 디렉터리를 하네스로 보지 않는다.
+- 집계: `pnpm harness:report`(`scripts/README.md`).
 
 ## 세션 시작 현황 (`session-context.mjs`, 이슈 #17 3단계)
 
@@ -62,10 +72,12 @@ Bash 해석(`lib/shell.mjs`):
 - 내용: 열린 PR(번호·제목·draft·라벨·CI, 위 5개), 열린 이슈(위 6개), 블로커(라벨 `blocked`, 본문이나 최근 댓글 3개의 `막힘: 예`, 인라인 코드 속 글자는 제외), 결정 기록(`decisions.md`) `## 결정` 표의 위 10줄(파일이 없으면 건너뜀).
 - 로컬 `.claude/settings.json`에는 넣지 않는다(플러그인이 켜져 있어 두 번 나온다).
 
-## worktree 격리 (이슈 #17 4단계)
+## worktree 격리 (이슈 #17 4단계, 6단계에서 수동 방식으로 바꿈)
 
-- `developer`는 `isolation: worktree`다. Claude Code가 `.claude/worktrees/` 아래에 원격 기본 브랜치에서 딴 임시 worktree를 만들고(추적 파일만, node_modules 없음), 변경이 없으면 끝날 때 지운다. 변경·push 안 한 커밋이 있으면 `cleanupPeriodDays` 뒤 주기 정리도 건너뛴다. 이슈 브랜치로 옮기는 법은 에이전트 본문에 있다.
-- `.claude/worktrees/`는 `.gitignore`·eslint·`check:req-trace`에서 뺀다(레포 전체 사본이라 메인 체크아웃 검사에 섞인다). 훅은 worktree 안에서도 그 worktree를 레포 루트로 본다.
+- 클라우드 환경은 서브에이전트 `isolation: "worktree"`를 권한으로 막는다("Permission to use Agent with isolation:* has been denied", 4단계 실측). 그래서 `developer` frontmatter에 `isolation`을 두지 않는다(있으면 developer 실행 자체가 막힐 수 있다).
+- 병렬 작업은 팀장이 지시할 때만 수동 worktree로 한다: `git worktree add /tmp/wt-<이슈번호> -b <브랜치> origin/main`에서 일하고 끝나면 `git worktree remove`. 절차는 `agents/developer.md`의 worktree 절.
+- 훅은 worktree 안에서도 그 worktree를 레포 루트로 본다(차단 로그도 그 worktree의 `.claude/logs/`에 쓴다).
+- `.claude/worktrees/`(로컬 Claude Code의 자동 worktree 위치)는 `.gitignore`·eslint·`check:req-trace`에서 계속 뺀다. 로컬에서는 쓸 수 있다.
 - worktree별 포트 스크립트는 없다. DB 테스트가 PGlite(프로세스 안)라 포트를 쓰지 않는다. 로컬 Supabase 스택을 쓰는 E2E를 도입할 때 만든다.
 
 ## 에이전트 메모리

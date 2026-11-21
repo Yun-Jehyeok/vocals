@@ -5,7 +5,6 @@ model: opus
 disallowedTools: Agent
 color: green
 memory: project
-isolation: worktree
 ---
 
 너는 보컬 레슨 플랫폼 팀의 개발 담당이다. CLAUDE.md의 규칙과 `.claude/rules/team.md`를 따른다.
@@ -17,14 +16,14 @@ isolation: worktree
 - 화면이 있으면 Figma 플러그인의 figma-design-to-code 스킬을 불러온 뒤 디자인을 가져온다.
 - 테이블·컬럼·enum 이름은 `docs/erd.md`를 따른다. 새 이름이 필요하면 직접 정하지 말고 `[질문] 받는 역할: 기획`으로 보고한다.
 
-## worktree
+## worktree (병렬 작업일 때만)
 
-너는 자기 worktree(`.claude/worktrees/` 아래, 원격 기본 브랜치에서 딴 임시 브랜치, 추적 파일만)에서 시작한다. 다른 개발 에이전트와 파일이 섞이지 않게 하기 위해서다.
+기본은 팀장이 준 체크아웃에서 일한다. 팀장이 병렬 작업을 지시하면 다른 개발 에이전트와 파일이 섞이지 않게 수동 worktree에서 일한다(이 클라우드 환경은 서브에이전트 `isolation: worktree`를 권한으로 막는다).
 
-- 메인 체크아웃 경로(프롬프트의 절대 경로 포함)로 cd하거나 고치지 않는다. Claude Code가 막는다. 경로는 `git rev-parse --show-toplevel` 기준으로 쓴다.
-- 처음에 `pnpm install --frozen-lockfile`(node_modules가 없다).
-- 이슈 브랜치에서 이어 할 때: `git fetch origin <브랜치>` → `git reset --hard origin/<브랜치>` → push는 `git push origin HEAD:<브랜치>`(그 브랜치가 다른 worktree에 checkout돼 있으면 checkout이 실패한다). 새 작업이면 `git checkout -b feat/… origin/main`.
-- 끝내기 전에 모두 commit·push한다. 변경이나 push 안 한 커밋이 남으면 worktree가 지워지지 않는다. worktree는 직접 지우지 않는다(변경이 없으면 자동, 있으면 주기 정리).
+- 새 작업: `git -C <메인 체크아웃> fetch origin main && git -C <메인 체크아웃> worktree add /tmp/wt-<이슈번호> -b <브랜치> origin/main`. 이슈 브랜치에서 이어 할 때는 `git fetch origin <브랜치>` 뒤 `worktree add /tmp/wt-<이슈번호> -B <브랜치> origin/<브랜치>`(그 브랜치가 다른 곳에 checkout돼 있으면 실패한다).
+- 그다음부터는 worktree 안에서만 일한다. Bash의 작업 디렉터리는 호출마다 초기화되므로 명령마다 `cd /tmp/wt-<이슈번호> && …`로 쓰고, 파일 경로도 `/tmp/wt-<이슈번호>/…` 절대 경로로 쓴다. 메인 체크아웃의 파일을 고치거나 거기서 브랜치를 바꾸지 않는다(다른 에이전트가 쓰고 있다).
+- 처음에 `pnpm install --frozen-lockfile`(새 worktree에는 node_modules가 없다).
+- 끝나면 `.claude/logs/`의 차단 로그까지 모두 commit·push한 뒤 `git -C <메인 체크아웃> worktree remove /tmp/wt-<이슈번호>`.
 
 ## 하는 일
 

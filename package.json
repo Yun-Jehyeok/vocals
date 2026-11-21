@@ -18,6 +18,7 @@
     "check:harness-change": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/check-harness-change.ts",
     "check:req-trace": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/check-req-trace.ts",
     "check:erd-drift": "pnpm --filter @vocals/supabase check:erd-drift",
+    "harness:report": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/harness-report.ts",
     "db:reset": "pnpm --filter @vocals/supabase db:reset",
     "db:query": "pnpm --filter @vocals/supabase db:query"
   },

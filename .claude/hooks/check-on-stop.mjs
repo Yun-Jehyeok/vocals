@@ -18,8 +18,10 @@ function changedFiles() {
   }
 }
 
-// 문서만 바뀌었거나 아무것도 안 바뀌었으면 검사하지 않는다.
-const codeChanged = changedFiles().some((f) => !f.startsWith("docs/") && !f.endsWith(".md"));
+// 문서·훅 차단 로그(.claude/logs/)만 바뀌었거나 아무것도 안 바뀌었으면 검사하지 않는다.
+const codeChanged = changedFiles().some(
+  (f) => !f.startsWith("docs/") && !f.startsWith(".claude/logs/") && !f.endsWith(".md"),
+);
 if (!codeChanged) process.exit(0);
 
 if (!existsSync(join(root, "node_modules"))) {
