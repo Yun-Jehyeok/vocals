@@ -31,8 +31,21 @@ export type TicketStatus = (typeof TICKET_STATUSES)[number];
 export const TICKET_END_REASONS = ["used_up", "expired", "refunded"] as const;
 export type TicketEndReason = (typeof TICKET_END_REASONS)[number];
 
+/** 유입 경로. DB enum `enrollments_source`, `fee_policies_source`가 같은 값을 쓴다. */
 export const ENROLLMENT_SOURCES = ["trainer_link", "marketplace"] as const;
 export type EnrollmentSource = (typeof ENROLLMENT_SOURCES)[number];
+
+/** 결제 수단 (PAY-01) */
+export const PAYMENT_METHODS = ["card", "kakaopay", "naverpay", "tosspay"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+/** 결제 상태 (PAY-03, PAY-11) */
+export const PAYMENT_STATUSES = ["paid", "partially_refunded", "refunded"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+/** 환불 요청 상태 (PAY-10, PAY-11) */
+export const REFUND_REQUEST_STATUSES = ["requested", "processed"] as const;
+export type RefundRequestStatus = (typeof REFUND_REQUEST_STATUSES)[number];
 
 export const ATTENDANCE_STATUSES = ["none", "present", "absent", "pre_canceled", "makeup"] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];

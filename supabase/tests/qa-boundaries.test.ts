@@ -86,12 +86,17 @@ describe("카탈로그 검사 (tech-stack 3.11, CLAUDE.md 보안)", () => {
     ).toEqual([]);
   });
 
-  it("authenticated의 테이블 단위 쓰기 권한은 trainer_genres DELETE뿐이다 (나머지는 컬럼 단위)", async () => {
+  it("authenticated의 테이블 단위 쓰기 권한은 trainer_genres·group_classes DELETE뿐이다 (나머지는 컬럼 단위)", async () => {
     const { rows } = await db.query<{ table_name: string; privilege_type: string }>(
       `select table_name, privilege_type from information_schema.role_table_grants
-       where table_schema = 'public' and grantee = 'authenticated' and privilege_type <> 'SELECT'`,
+       where table_schema = 'public' and grantee = 'authenticated' and privilege_type <> 'SELECT'
+       order by table_name`,
     );
-    expect(rows).toEqual([{ table_name: "trainer_genres", privilege_type: "DELETE" }]);
+    // group_classes: 배정된 수강권이 없는 반은 트레이너가 지운다(#28 팀장 결정 8, erd 4장)
+    expect(rows).toEqual([
+      { table_name: "group_classes", privilege_type: "DELETE" },
+      { table_name: "trainer_genres", privilege_type: "DELETE" },
+    ]);
   });
 
   it("클라이언트는 서버만 쓰는 컬럼에 INSERT·UPDATE 권한이 없다 — AUTH-02, AUTH-03, AUTH-08, ADM-01, PLT-01, TRN-02", async () => {

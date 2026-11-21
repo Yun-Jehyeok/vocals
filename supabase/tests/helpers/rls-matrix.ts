@@ -86,6 +86,47 @@ export async function attempt(
   }
 }
 
+/**
+ * 값 검사·무결성 판정에서 "거부"로 보는 오류 (이슈 #28).
+ * - 23xxx: 제약 위반(check, unique, FK, exclusion). 단 23502(not null)는 시도 SQL이 컬럼을 빠뜨린
+ *   실수일 수 있어 거부로 치지 않는다.
+ * - 42501: 권한 없음, RLS 위반
+ * - P0001: 트리거·함수의 raise exception 기본 코드
+ */
+const REJECTED_CODE = /^(23(?!502)\d{3}|42501|P0001)$/;
+
+/**
+ * 쓰기 시도가 받아들여지는지 판정한다. 항상 되돌린다. (이슈 #28)
+ * 권한 매트릭스(attempt)와 달리 제약·트리거로 막힌 것도 거부로 본다. 값 검사, 정원, 중복 같은
+ * "막는 방법은 개발이 고르는" 완료 조건에 쓴다.
+ * - 1행 이상 바뀌면 allow, 0행이거나 REJECTED_CODE 오류면 reject
+ * - 그 밖의 오류(없는 테이블·컬럼, 문법, not null)는 판정하지 않고 던진다.
+ * 거부 판정은 같은 시도의 허용되는 짝(바른 값)과 함께 쓴다. 그래야 준비 데이터가 틀려서 거부되는 것을 가린다.
+ */
+export async function attemptWrite(
+  db: PGlite,
+  actor: Actor,
+  opCase: OpCase,
+): Promise<"allow" | "reject"> {
+  try {
+    const result = await queryAs(
+      db,
+      actor,
+      opCase.sql,
+      opCase.params ?? [],
+      opCase.setup ? { setup: opCase.setup } : {},
+    );
+    return result.affectedRows > 0 ? "allow" : "reject";
+  } catch (error) {
+    const code = String((error as { code?: unknown }).code);
+    const message = error instanceof Error ? error.message : String(error);
+    if (REJECTED_CODE.test(code) || opCase.deniedBy?.test(message)) return "reject";
+    throw new Error(`제약·권한 거부가 아니라서 판정할 수 없다 (${code}): ${message}`, {
+      cause: error,
+    });
+  }
+}
+
 /** 매트릭스가 정의되지 않은 역할·테이블·동작을 가리키면 테스트를 만들기 전에 멈춘다. */
 export function validateMatrix(matrix: RlsMatrix): void {
   for (const [actor, table, ...expectations] of matrix.rows) {
