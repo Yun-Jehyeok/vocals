@@ -62,10 +62,12 @@ Bash 해석(`lib/shell.mjs`):
 - 내용: 열린 PR(번호·제목·draft·라벨·CI, 위 5개), 열린 이슈(위 6개), 블로커(라벨 `blocked`, 본문이나 최근 댓글 3개의 `막힘: 예`, 인라인 코드 속 글자는 제외), 결정 기록(`decisions.md`) `## 결정` 표의 위 10줄(파일이 없으면 건너뜀).
 - 로컬 `.claude/settings.json`에는 넣지 않는다(플러그인이 켜져 있어 두 번 나온다).
 
-## worktree 격리 (이슈 #17 4단계)
+## worktree 격리 (이슈 #17 4단계, 6단계에서 수동 방식으로 바꿈)
 
-- `developer`는 `isolation: worktree`다. Claude Code가 `.claude/worktrees/` 아래에 원격 기본 브랜치에서 딴 임시 worktree를 만들고(추적 파일만, node_modules 없음), 변경이 없으면 끝날 때 지운다. 변경·push 안 한 커밋이 있으면 `cleanupPeriodDays` 뒤 주기 정리도 건너뛴다. 이슈 브랜치로 옮기는 법은 에이전트 본문에 있다.
-- `.claude/worktrees/`는 `.gitignore`·eslint·`check:req-trace`에서 뺀다(레포 전체 사본이라 메인 체크아웃 검사에 섞인다). 훅은 worktree 안에서도 그 worktree를 레포 루트로 본다.
+- 클라우드 환경은 서브에이전트 `isolation: "worktree"`를 권한으로 막는다("Permission to use Agent with isolation:* has been denied", 4단계 실측). 그래서 `developer` frontmatter에 `isolation`을 두지 않는다(있으면 developer 실행 자체가 막힐 수 있다).
+- 병렬 작업은 팀장이 지시할 때만 수동 worktree로 한다: `git worktree add /tmp/wt-<이슈번호> -b <브랜치> origin/main`에서 일하고 끝나면 `git worktree remove`. 절차는 `agents/developer.md`의 worktree 절.
+- 훅은 worktree 안에서도 그 worktree를 레포 루트로 본다(차단 로그도 그 worktree의 `.claude/logs/`에 쓴다).
+- `.claude/worktrees/`(로컬 Claude Code의 자동 worktree 위치)는 `.gitignore`·eslint·`check:req-trace`에서 계속 뺀다. 로컬에서는 쓸 수 있다.
 - worktree별 포트 스크립트는 없다. DB 테스트가 PGlite(프로세스 안)라 포트를 쓰지 않는다. 로컬 Supabase 스택을 쓰는 E2E를 도입할 때 만든다.
 
 ## 에이전트 메모리

@@ -29,13 +29,13 @@ description: PM의 기능 요청이나 작업 지시를 기획·디자인·개�
 - QA에게 커밋 지시를 줄 때는 트레일러(Acceptance, Co-Authored-By, Claude-Session)를 마지막 문단에 빈 줄 없이 한 덩어리로 쓰라고 적는다.
 - QA 판정에 실행 결과 근거가 없으면 돌려보낸다. E2E·Figma 비교는 앱·화면이 생기는 이슈부터.
 
-서로 기다릴 필요가 없는 일만 동시에 맡긴다. 예: 인수 테스트가 올라간 뒤 디자인과 개발의 `packages/shared` 규칙 함수 작업. 개발 두 개를 동시에 맡기면 각자 자기 worktree·브랜치에서 일하므로, 같은 파일(`domain.ts`, seed, 같은 날짜의 마이그레이션 등)을 건드릴 작업은 동시에 주지 않는다.
+서로 기다릴 필요가 없는 일만 동시에 맡긴다. 예: 인수 테스트가 올라간 뒤 디자인과 개발의 `packages/shared` 규칙 함수 작업. 개발 두 개를 동시에 맡기면 각자 `/tmp/wt-<이슈번호>` worktree·브랜치에서 일하게 하므로(3장), 같은 파일(`domain.ts`, seed, 같은 날짜의 마이그레이션 등)을 건드릴 작업은 동시에 주지 않는다.
 
 ## 3. 에이전트에게 맡기기
 
 - 플러그인이 있으면 `vocals-team`의 `planner`, `designer`, `developer`, `qa` 에이전트를 쓴다.
-- 없으면 `plugins/vocals-team/agents/<역할>.md`의 본문을 프롬프트 앞에 붙여 general-purpose 에이전트에게 맡긴다. frontmatter의 `model`과 `effort`를 그대로 넘기고, `isolation: worktree`면 호출에 `isolation: "worktree"`를 넘긴다.
-- 프롬프트에는 이슈 번호, 이번에 할 일, 이전 단계 결과물 링크만 넣는다. 대화 내용 전체를 넘기지 않는다. 개발에게는 메인 체크아웃 경로 대신 이어 할 브랜치 이름을 준다(worktree에서 일한다).
+- 없으면 `plugins/vocals-team/agents/<역할>.md`의 본문을 프롬프트 앞에 붙여 general-purpose 에이전트에게 맡긴다. frontmatter의 `model`과 `effort`를 그대로 넘긴다. 호출에 `isolation: "worktree"`는 넘기지 않는다(클라우드에서 권한으로 막힌다).
+- 프롬프트에는 이슈 번호, 이번에 할 일, 이전 단계 결과물 링크만 넣는다. 대화 내용 전체를 넘기지 않는다. 개발에게는 이어 할 브랜치 이름을 준다. 개발을 병렬로 돌릴 때만 "`git worktree add /tmp/wt-<이슈번호> -b <브랜치> origin/main`에서 작업하고 끝나면 `git worktree remove`"를 넣고 메인 체크아웃 경로를 함께 준다(developer.md의 worktree 절).
 - 결과로 받은 에이전트 ID를 이슈별로 기억해 둔다. 같은 이슈에서 그 역할이 다시 필요하면 새로 띄우지 않고 SendMessage로 깨운다.
 
 ## 4. 질문 전달
@@ -70,5 +70,6 @@ description: PM의 기능 요청이나 작업 지시를 기획·디자인·개�
 - 기획→PM: 제출 마감 이후 재제출 허용 여부 → PM 답 대기
 ```
 
+- 작업을 끝내기 전에 그 세션의 훅 차단 로그(`.claude/logs/*.jsonl`, 이슈 #17 6단계)를 작업 PR에 커밋한다. 클라우드는 세션이 끝나면 파일이 사라진다.
 - QA가 실행 결과를 근거로 완료 조건을 모두 통과로 판정하면 PM에게 보고한다: PR 링크, 통과 수/전체 수, 남은 결정. merge는 PM이 한다.
 - 하네스 PR(`harness` 라벨): 라벨을 붙일 때 PR head 커밋을 회의록에 적는다. 라벨은 그 뒤 push에도 남으므로, merge 요청 직전에 `git diff <그 커밋>..origin/<브랜치> --name-only`로 하네스 diff를 다시 보고, 라벨을 붙인 뒤 바뀐 하네스 파일이 있으면 PM 보고에 적는다.
