@@ -2,7 +2,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { anon, asUser, createTestDb, service } from "./helpers/db.ts";
-import { attempt, describeRlsMatrix, validateMatrix } from "./helpers/rls-matrix.ts";
+import { attempt, attemptWrite, describeRlsMatrix, validateMatrix } from "./helpers/rls-matrix.ts";
 import type { RlsMatrix } from "./helpers/rls-matrix.ts";
 import { SEED } from "./helpers/seed-ids.ts";
 
@@ -101,6 +101,40 @@ describe("RLS 매트릭스 헬퍼 판정 (이슈 #17)", () => {
     expect(
       await attempt(db, service, "insert", { ...studentProfile, deniedBy: /role = trainer/ }),
     ).toBe("deny");
+  });
+
+  it("attemptWrite: 제약 위반·권한·0행은 거부, 바뀌면 허용 (이슈 #28)", async () => {
+    const trainer = asUser(SEED.trainerApproved);
+    const duplicate = {
+      sql: `insert into public.trainer_genres (trainer_id, genre_id) values ($1, 1)`,
+      params: [SEED.trainerApproved],
+    };
+    expect(await attemptWrite(db, trainer, duplicate)).toBe("reject"); // 23505
+    expect(await attemptWrite(db, trainer, genres.insert)).toBe("allow");
+    expect(await attemptWrite(db, anon, genres.insert)).toBe("reject"); // 42501
+    expect(await attemptWrite(db, asUser(SEED.trainerPilot), genres.delete)).toBe("reject"); // 0행
+    // 트리거의 check_violation(23514): 학생에게 트레이너 프로필 — AUTH-02
+    expect(
+      await attemptWrite(db, service, {
+        sql: `insert into public.trainer_profiles (user_id) values ($1)`,
+        params: [SEED.student1],
+      }),
+    ).toBe("reject");
+  });
+
+  it("attemptWrite: 없는 테이블·컬럼, not null 오류는 거부로 치지 않고 던진다 (이슈 #28)", async () => {
+    await expect(
+      attemptWrite(db, service, { sql: `insert into public.no_such_table values (1)` }),
+    ).rejects.toThrow(/판정할 수 없다/);
+    await expect(
+      attemptWrite(db, service, { sql: `update public.users set no_such_column = 1` }),
+    ).rejects.toThrow(/판정할 수 없다/);
+    await expect(
+      attemptWrite(db, service, {
+        sql: `insert into public.trainer_genres (trainer_id) values ($1)`,
+        params: [SEED.trainerApproved],
+      }),
+    ).rejects.toThrow(/판정할 수 없다.*23502/);
   });
 
   it("시도가 끝나면 항상 되돌린다", async () => {
