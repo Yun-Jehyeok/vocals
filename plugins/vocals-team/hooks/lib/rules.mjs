@@ -56,65 +56,76 @@ export function realPath(abs) {
   }
 }
 
-/** @typedef {{ summary: string, why: string, instead: string }} Violation */
+/** @typedef {{ rule: string, summary: string, why: string, instead: string }} Violation */
 /** @typedef {"write" | "tree"} Kind */
 
 const MESSAGES = {
   env: {
+    rule: "file.env",
     summary: ".env 파일은 수정하지 않습니다.",
     why: ".env에는 비밀 값이 들어 있고 사람이 직접 관리합니다(CLAUDE.md 보안).",
     instead: "필요한 키 이름만 `.env.example`에 적고, 값이 필요하다고 [보고]로 사람에게 알리세요.",
   },
   migration: {
+    rule: "file.migration",
     summary: "기존 마이그레이션 파일은 고치거나 지우지 않습니다.",
     why: "main에 들어간 마이그레이션은 이미 어딘가에 적용됐을 수 있어, 고치면 DB마다 스키마가 달라집니다.",
     instead: "바꿀 내용은 `supabase/migrations/<타임스탬프>_<이름>.sql` 새 파일로 만드세요.",
   },
   developerDocs: {
+    rule: "developer.docs",
     summary: "docs/는 기획 담당입니다.",
     why: "문서가 기준이고, 개발이 문서를 고치면 기준을 스스로 바꾸는 셈입니다.",
     instead: "변경이 필요하면 `[질문] 받는 역할: 기획`으로 보고하세요.",
   },
   developerAcceptance: {
+    rule: "developer.acceptance",
     summary: "인수 테스트와 판정 헬퍼는 QA 담당입니다.",
     why: "개발이 바꾸면 완료 기준을 스스로 바꾸는 셈입니다(CI의 acceptance-guard도 실패합니다).",
     instead:
       "테스트가 틀렸거나 문서와 다르다고 보면 고치지 말고 `[질문] 받는 역할: QA`로 보고하세요.",
   },
   qa: {
+    rule: "qa.scope",
     summary: "QA는 테스트 파일과 요구사항 추적 기준선만 바꿉니다.",
     why: "기능 코드는 개발 담당입니다. QA가 고치면 판정이 독립적이지 않게 됩니다.",
     instead:
       "테스트(`*.test.ts`, `supabase/tests/`, `tests/`)로 재현하고 `[질문] 받는 역할: 개발`로 보고하세요. 문서 문제는 `[질문] 받는 역할: 기획`.",
   },
   qaDocs: {
+    rule: "qa.scope",
     summary: "QA는 테스트 파일과 요구사항 추적 기준선만 바꿉니다.",
     why: "문서는 기획 담당입니다. 문서가 판정 기준이라 QA가 고치면 기준을 스스로 바꾸는 셈입니다.",
     instead: "문서가 틀렸거나 모호하다고 보면 `[질문] 받는 역할: 기획`으로 보고하세요.",
   },
   qaSeed: {
+    rule: "qa.scope",
     summary: "QA는 테스트 파일과 요구사항 추적 기준선만 바꿉니다.",
     why: "seed(더미 데이터)는 개발 담당입니다. 개발이 바꾸고 QA는 판정으로 확인합니다(CLAUDE.md 훅과 CI).",
     instead:
       "테스트에 필요한 데이터는 테스트 안에서 만들고, seed 변경이 필요하면 `[질문] 받는 역할: 개발`로 보고하세요.",
   },
   qaHarness: {
+    rule: "qa.scope",
     summary: "QA는 테스트 파일과 요구사항 추적 기준선만 바꿉니다.",
     why: "CI·훅·검사 스크립트(하네스)는 개발이 바꾸고 팀장이 `harness` 라벨로 확인합니다.",
     instead: "검사가 틀렸다고 보면 [보고]에 적어 팀장에게 넘기세요.",
   },
   planner: {
+    rule: "planner.scope",
     summary: "기획은 docs/와 팀 규칙 문서(CLAUDE.md, .claude/rules/, 플러그인 md)만 바꿉니다.",
     why: "코드와 설정은 개발 담당입니다.",
     instead:
       "필요한 변경을 이슈의 완료 조건·데이터 변경에 적고, [보고]에서 개발에 맡길 일로 넘기세요.",
   },
   plannerHarness: {
+    rule: "planner.scope",
     summary: "기획은 docs/와 팀 규칙 문서(CLAUDE.md, .claude/rules/, 플러그인 md)만 바꿉니다.",
     why: "CI·훅·검사 스크립트(하네스)는 개발이 바꾸고 팀장이 `harness` 라벨로 확인합니다. CI 변경은 PM 승인 항목입니다.",
     instead: "필요한 변경을 [보고]에 적어 팀장에게 넘기세요.",
   },
   designer: {
+    rule: "designer.code",
     summary: "코드(apps/, packages/, supabase/, scripts/)는 개발 담당입니다.",
     why: "디자인은 Figma와 디자인 문서로 전달하고, 코드는 개발이 그것을 보고 구현합니다.",
     instead:
@@ -286,14 +297,14 @@ export class PathRules {
    * 절대 경로 하나를 검사한다.
    * @param {string} abs
    * @param {Kind} kind
-   * @returns {(Violation & { file: string }) | null}
+   * @returns {(Violation & { file: string, logTarget: string, root: string | null }) | null}
    */
   check(abs, kind) {
     const real = realPath(abs);
     for (const path of new Set([abs, real])) {
       const name = basename(path).toLowerCase();
       if (/^\.env(\..+)?$/.test(name) && name !== ".env.example") {
-        return { ...MESSAGES.env, file: abs };
+        return { ...MESSAGES.env, file: abs, logTarget: abs, root: null };
       }
     }
 
@@ -307,6 +318,8 @@ export class PathRules {
     const hit = (violation) => ({
       ...violation,
       file: (shown || ".") + (real !== abs ? ` (링크: ${abs})` : ""),
+      logTarget: shown || ".",
+      root,
     });
 
     if (repo.baseMigrations.some((migration) => touches(file, migration, kind))) {

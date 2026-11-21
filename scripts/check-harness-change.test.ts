@@ -102,6 +102,12 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
     expect(isHarnessPath(".claude/rules/team.md")).toBe(true);
   });
 
+  it("훅 차단 로그(.claude/logs/)는 하네스가 아니다 (이슈 #17 6단계)", () => {
+    expect(isHarnessPath(".claude/logs/2026-11-21-abcd1234.jsonl")).toBe(false);
+    expect(isHarnessPath(".claude/logs-old/x.jsonl")).toBe(true);
+    expect(isHarnessPath(".claude/hooks/check-on-stop.mjs")).toBe(true);
+  });
+
   it("하네스 밖만 바뀌면 라벨 없이 통과한다", () => {
     commit("feat: x", {
       "packages/shared/src/rule.ts": "export {}",

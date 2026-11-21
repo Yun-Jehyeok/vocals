@@ -60,6 +60,8 @@ run(() => {
     block({
       summary: `Supabase \`${tool}\`은(는) 쓰지 않습니다.`,
       target: toolName,
+      rule: "mcp.supabase",
+      logTarget: toolName, // 도구 이름만. 인자 값(project_id, SQL 등)은 남기지 않는다
       why: "원격 DB·비용·스키마에 바로 영향을 주고 되돌리기 어렵습니다. 스키마는 마이그레이션 파일로만 바꾸고, 원격 프로젝트는 새로 만들지 않습니다(CLAUDE.md).",
       instead: INSTEAD[tool] ?? DEFAULT_INSTEAD,
     });

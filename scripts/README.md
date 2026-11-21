@@ -10,6 +10,34 @@
 | `pnpm check:req-trace`        | `docs/prd.md`의 요구사항 ID마다 이름(describe/it/test)에 그 ID가 들어간 테스트가 있는지 본다. 빠진 ID 목록을 출력한다. 기준선이 merge-base보다 늘었는지도 본다.                                                                                                                                                                                                                                                                                                       |
 | `pnpm check:erd-drift`        | `docs/erd.md`의 테이블·컬럼·enum 값을 마이그레이션을 적용한 스키마와 비교한다. 코드는 `supabase/scripts/check-erd-drift.ts`.                                                                                                                                                                                                                                                                                                                                          |
 
+## 하네스 측정 보고 (`pnpm harness:report`, 이슈 #17 6단계)
+
+검사가 아니라 보고다(`pnpm check`에 들어가지 않는다). 최근 N일을 마크다운으로 출력한다.
+
+- 옵션: `--days N`(기본 7), `--no-github`(로그만), `--now <ISO 시각>`(기준 시각)
+- 훅 차단: `.claude/logs/*.jsonl`(플러그인 README "차단 로그")을 규칙별·역할별로 센다. 경로는 보고에 옮기지 않는다.
+- PM 개입: 이슈·PR 댓글, PR 리뷰 코멘트·리뷰 본문의 `받는 역할: PM` 수. 코드 블록·인라인 코드 안은 세지 않는다.
+- QA 반려: 첫 줄이 `[QA 반려]`로 시작하는 댓글·리뷰 수(`agents/qa.md`).
+- CI 실패 원인: 실패한 워크플로 실행(앞 50개)의 실패 job › step별 횟수.
+- 반복된 실수: 같은 규칙·같은 실패 step이 2회 이상이면 린트·훅·테스트 승격 제안.
+- 한 번도 걸리지 않은 규칙: `RULE_IDS` − 기간 안에 걸린 규칙. 로그가 28일치 미만이면 "판단 보류".
+- GitHub는 `gh api`(REST)로 읽는다(클라우드는 GraphQL을 막는다). 실패하면 그 절만 "조회 실패(gh api)"로 쓴다. 단위 테스트는 `harness-report.test.ts`(가짜 로그·가짜 gh 응답).
+
+### 주간 예약 작업
+
+팀장이 #17 6단계 PR merge 뒤 예약 작업으로 만든다. 매주 실행하는 명령:
+
+```sh
+git fetch origin main && git checkout --detach origin/main
+pnpm install --frozen-lockfile
+pnpm -s harness:report --days 7 > /tmp/harness-report.md
+gh api repos/{owner}/{repo}/issues/17/comments -F body=@/tmp/harness-report.md --jq .html_url
+```
+
+- 결과는 #17 댓글로 남는다(`-F body=@파일`은 파일 내용을 본문으로 보낸다). 댓글 URL을 예약 작업 결과에 적는다.
+- 로그는 main에 merge된 작업 PR에 들어 있는 것만 센다. 아직 merge되지 않은 PR의 로그는 다음 주에 잡힌다.
+- 반복된 실수·정리 제안은 보고일 뿐이다. 실제 승격·삭제는 팀장이 이슈로 만들어 하네스 PR로 한다.
+
 ## 요구사항 추적 기준선
 
 - `req-trace-baseline.txt`는 아직 테스트가 없는 ID 목록이다. 줄어들기만 한다.

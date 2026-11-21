@@ -31,17 +31,20 @@ const COMMAND_RULES = [
     ...pushMain(),
   },
   {
+    rule: "supabase.db-reset-remote",
     test: new RegExp(String.raw`${SB}\bdb\s+reset\b[^\n;&|]*--(linked|db-url)`),
     summary: "원격 Supabase DB는 초기화하지 않습니다(`--linked`, `--db-url`).",
     why: "원격 DB의 데이터가 모두 지워지고 되돌릴 수 없습니다.",
     instead: REMOTE_DB.instead,
   },
   {
+    rule: "supabase.db-push",
     test: new RegExp(String.raw`${SB}\bdb\s+push\b`),
     summary: "`supabase db push`로 원격 DB에 마이그레이션을 적용하지 않습니다.",
     ...REMOTE_DB,
   },
   {
+    rule: "supabase.migration-remote",
     test: new RegExp(
       String.raw`${SB}\bmigration\s+(up|down|fetch)\b[^\n;&|]*--(linked|db-url)|${SB}\bmigration\s+repair\b(?![^\n;&|]*--local)`,
     ),
@@ -49,6 +52,7 @@ const COMMAND_RULES = [
     ...REMOTE_DB,
   },
   {
+    rule: "supabase.remote-command",
     test: new RegExp(
       String.raw`${SB}\b(functions\s+(deploy|delete)|secrets\s+(set|unset)|projects\s+(create|delete)|branches\s+(create|delete|update|disable)|config\s+push|postgres-config\s+(update|delete)|orgs\s+create|storage\s+(rm|cp|mv)|seed\s+buckets[^\n;&|]*--linked)\b`,
     ),
@@ -56,6 +60,7 @@ const COMMAND_RULES = [
     ...REMOTE_DB,
   },
   {
+    rule: "supabase.psql-remote",
     test: /\bpsql\b[^\n;&|]*(supabase\.(co|com|net)|pooler\.supabase)/i,
     summary: "psql로 원격 Supabase DB에 접속하지 않습니다.",
     ...REMOTE_DB,
@@ -64,6 +69,7 @@ const COMMAND_RULES = [
 
 function forcePush() {
   return {
+    rule: "bash.force-push",
     summary: "강제 push(--force, -f, +refspec, --mirror)는 하지 않습니다.",
     why: "원격 기록을 덮어쓰면 다른 사람의 커밋이 사라지고 되돌리기 어렵습니다.",
     instead:
@@ -72,6 +78,7 @@ function forcePush() {
 }
 function pushMain() {
   return {
+    rule: "bash.push-main",
     summary: "main에 직접 push하지 않습니다.",
     why: "main은 사람이 PR을 merge할 때만 바뀝니다(CLAUDE.md 작업 방식).",
     instead: "작업 브랜치(`feat/…`, `fix/…`, `chore/…`)에 push하고 draft PR을 여세요.",
@@ -145,19 +152,21 @@ run(() => {
   // 명령이 아니므로 뺀다. 인터프리터·셸 표준 입력의 heredoc은 남긴다.
   const ruleText = stripDataHeredocs(command);
   for (const rule of COMMAND_RULES) {
-    if (rule.test.test(ruleText)) block({ ...rule, target: command });
+    if (rule.test.test(ruleText)) block({ ...rule, target: command, root: cwd });
   }
 
   const { targets, commits, pushes, opaque } = analyzeCommand(command, cwd);
 
   for (const push of pushes) {
     const info = pushInfo(push.args);
-    if (info.force) block({ ...forcePush(), target: command });
+    if (info.force) block({ ...forcePush(), target: command, root: push.cwd });
     const current = git(push.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
     const destinations = info.hasRefspec
       ? info.destinations.map((d) => (d === "HEAD" ? current : d))
       : [current];
-    if (info.all || destinations.includes("main")) block({ ...pushMain(), target: command });
+    if (info.all || destinations.includes("main")) {
+      block({ ...pushMain(), target: command, root: push.cwd });
+    }
   }
 
   const rules = new PathRules({ role });
@@ -172,6 +181,9 @@ run(() => {
     const mentioned = mentionsProtected(command, protectedPaths);
     if (mentioned) {
       block({
+        rule: "developer.opaque-write",
+        logTarget: mentioned,
+        root: cwd,
         summary: `훅이 풀 수 없는 쓰기(${opaque.slice(0, 3).join(", ")})와 보호 경로(${mentioned})가 한 명령에 있습니다.`,
         target: command,
         why: "이 명령이 어떤 파일을 쓰는지 훅이 알 수 없어, 개발 역할에서는 docs/·인수 테스트·마이그레이션을 건드릴 수 있으면 막습니다.",
@@ -184,6 +196,8 @@ run(() => {
   if (role && role !== "qa") {
     if (/Acceptance\s*:/i.test(command)) {
       block({
+        rule: "commit.acceptance-text",
+        root: cwd,
         summary: "명령에 `Acceptance:`가 있습니다.",
         target: command,
         why: TRAILER_WHY,
@@ -195,6 +209,8 @@ run(() => {
       /core\.editor|\bGIT_EDITOR\b|commit\.template|\btrailer\.|interpret-trailers/i.test(command)
     ) {
       block({
+        rule: "commit.git-config",
+        root: cwd,
         summary: "git 편집기·템플릿·트레일러 설정을 바꾸는 명령은 쓰지 않습니다.",
         target: command,
         why: `${TRAILER_WHY} 편집기·템플릿·트레일러 설정으로 메시지에 트레일러를 넣을 수 있습니다.`,
@@ -205,6 +221,8 @@ run(() => {
       const reason = suspiciousCommit(commit);
       if (reason) {
         block({
+          rule: "commit.message-source",
+          root: commit.cwd,
           summary: `${reason}은(는) QA만 합니다.`,
           target: command,
           why: `${TRAILER_WHY} 이 방식은 훅이 메시지를 미리 볼 수 없습니다.`,
