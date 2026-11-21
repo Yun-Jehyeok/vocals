@@ -32,6 +32,8 @@ const SKIP_DIRS = new Set([
   ".next",
   ".pglite",
 ]);
+/** 루트 기준 경로로 건너뛰는 디렉터리. 서브에이전트 worktree는 레포 전체 사본이라 세면 다른 브랜치의 테스트가 섞인다(#17 4단계). */
+const SKIP_PATHS = [join(".claude", "worktrees")];
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 
 /** 정의된 요구사항 ID를 문서 순서대로, 중복 없이 */
@@ -152,7 +154,8 @@ export function findTestFiles(root: string): string[] {
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name));
+        const path = join(dir, entry.name);
+        if (!SKIP_DIRS.has(entry.name) && !SKIP_PATHS.includes(relative(root, path))) walk(path);
       } else if (TEST_FILE.test(entry.name)) {
         files.push(join(dir, entry.name));
       }

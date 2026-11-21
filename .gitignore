@@ -11,8 +11,9 @@ coverage/
 .env.*
 !.env.example
 
-# Claude Code 개인 설정
+# Claude Code 개인 설정, 서브에이전트 worktree
 .claude/settings.local.json
+.claude/worktrees/
 
 # 로컬 DB (pnpm db:reset)
 supabase/.pglite/

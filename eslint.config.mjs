@@ -11,6 +11,7 @@ export default tseslint.config(
       "**/.next/**",
       "**/coverage/**",
       "supabase/.pglite/**",
+      ".claude/worktrees/**",
     ],
   },
   js.configs.recommended,
