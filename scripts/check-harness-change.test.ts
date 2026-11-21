@@ -95,6 +95,13 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
     }
   });
 
+  it("에이전트 프로젝트 메모리(.claude/agent-memory/)는 하네스가 아니다 (이슈 #17 3단계)", () => {
+    expect(isHarnessPath(".claude/agent-memory/developer/MEMORY.md")).toBe(false);
+    expect(isHarnessPath(".claude/agent-memory/vocals-team-qa/MEMORY.md")).toBe(false);
+    expect(isHarnessPath(".claude/agent-memory-local/x.md")).toBe(true);
+    expect(isHarnessPath(".claude/rules/team.md")).toBe(true);
+  });
+
   it("하네스 밖만 바뀌면 라벨 없이 통과한다", () => {
     commit("feat: x", {
       "packages/shared/src/rule.ts": "export {}",

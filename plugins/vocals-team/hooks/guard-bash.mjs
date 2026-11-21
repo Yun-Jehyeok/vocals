@@ -5,7 +5,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { block, readInput, run } from "./lib/io.mjs";
 import { findRepoRoot, mentionsProtected, PathRules, roleOf } from "./lib/rules.mjs";
-import { analyzeCommand, commitSources, pushInfo, TRAILER_LINE } from "./lib/shell.mjs";
+import {
+  analyzeCommand,
+  commitSources,
+  pushInfo,
+  stripDataHeredocs,
+  TRAILER_LINE,
+} from "./lib/shell.mjs";
 
 const REMOTE_DB = {
   why: "원격 Supabase 프로젝트의 스키마·데이터·설정을 바로 바꾸고 되돌리기 어렵습니다. 스키마는 마이그레이션 파일과 PR로만 바꿉니다(CLAUDE.md).",
@@ -73,7 +79,7 @@ function pushMain() {
 }
 
 const COMMIT_INSTEAD =
-  "메시지는 `git commit -m \"…\"`(치환 없이) 또는 `git commit -F - <<'EOF' … EOF`로 쓰고, 트레일러는 `Co-Authored-By`·`Claude-Session`만 다세요. 인수 테스트를 바꿔야 한다고 보면 `[질문] 받는 역할: QA`로 보고하세요.";
+  "메시지는 `git commit -m \"…\"`(치환 없이) 또는 `git commit -F - <<'EOF' … EOF`로 쓰고, 트레일러는 `Co-Authored-By`·`Claude-Session`만 다세요. 이 검사는 명령 전체를 봅니다. 다른 명령과 `;`·`&&`로 이어 붙였다면(`git log --grep …; git commit …`, 파일을 고치는 python heredoc 등) 나눠서 따로 실행하세요. 인수 테스트를 바꿔야 한다고 보면 `[질문] 받는 역할: QA`로 보고하세요.";
 const TRAILER_WHY =
   "`Acceptance: qa` 트레일러는 QA만 답니다. 다른 역할이 달면 acceptance-guard가 인수 테스트 변경을 QA 승인으로 잘못 봅니다.";
 const SAFE_TRAILERS = /^\s*(co-authored-by|claude-session|signed-off-by)\s*[:=]/i;
@@ -135,8 +141,11 @@ run(() => {
   const role = roleOf(input.agent_type);
   const cwd = String(input.cwd ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
 
+  // `cat > 파일 <<'EOF'`, `git commit -F - <<'EOF'`의 본문(데이터)에 든 "git push origin main" 같은 글자는
+  // 명령이 아니므로 뺀다. 인터프리터·셸 표준 입력의 heredoc은 남긴다.
+  const ruleText = stripDataHeredocs(command);
   for (const rule of COMMAND_RULES) {
-    if (rule.test.test(command)) block({ ...rule, target: command });
+    if (rule.test.test(ruleText)) block({ ...rule, target: command });
   }
 
   const { targets, commits, pushes, opaque } = analyzeCommand(command, cwd);

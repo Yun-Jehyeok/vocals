@@ -151,6 +151,10 @@ const QA_ONLY = "QA는 테스트 파일";
 const PLANNER = "기획은 docs/";
 const DESIGNER = "코드(apps/";
 const TRAILER = "트레일러는 QA만 답니다";
+const QA_CODE = "왜: 기능 코드는 개발 담당";
+const QA_DOCS = "왜: 문서는 기획 담당";
+const QA_SEED = "왜: seed(더미 데이터)는 개발 담당";
+const HARNESS = "왜: CI·훅·검사 스크립트(하네스)";
 
 type Row = [role: string | undefined, path: string, verdict: "차단" | "허용", reason?: string];
 
@@ -193,6 +197,19 @@ describe("guard-files: 파일 쓰기 도구의 역할별·전역 차단 (이슈 
     ["qa", "supabase/migrations/20260301000000_next.sql", "차단", QA_ONLY],
     ["qa", "docs/prd.md", "차단", QA_ONLY],
     ["qa", "scripts/acceptance-guard.ts", "차단", QA_ONLY],
+    // 차단의 "왜"는 대상에 맞게(이슈 #17 3단계)
+    ["qa", "packages/shared/src/rule.ts", "차단", QA_CODE],
+    ["qa", "docs/prd.md", "차단", QA_DOCS],
+    ["qa", "CLAUDE.md", "차단", QA_DOCS],
+    ["qa", "supabase/seed.sql", "차단", QA_SEED],
+    ["qa", "scripts/acceptance-guard.ts", "차단", HARNESS],
+    ["qa", ".github/workflows/ci.yml", "차단", HARNESS],
+    // QA 프로젝트 메모리(memory: project)
+    ["qa", ".claude/agent-memory/qa/MEMORY.md", "허용"],
+    ["vocals-team:qa", ".claude/agent-memory/vocals-team-qa/MEMORY.md", "허용"],
+    ["qa", ".claude/agent-memory/developer/MEMORY.md", "차단", QA_ONLY],
+    ["qa", ".claude/agent-memory/qa-other.md", "차단", QA_ONLY],
+    ["developer", ".claude/agent-memory/developer/MEMORY.md", "허용"],
     // planner
     ["planner", "docs/prd.md", "허용"],
     ["planner", "docs/decisions.md", "허용"],
@@ -202,6 +219,8 @@ describe("guard-files: 파일 쓰기 도구의 역할별·전역 차단 (이슈 
     ["planner", "plugins/vocals-team/hooks/guard-bash.mjs", "차단", PLANNER],
     ["planner", "packages/shared/src/rule.ts", "차단", PLANNER],
     ["planner", ".github/workflows/ci.yml", "차단", PLANNER],
+    ["planner", ".github/workflows/ci.yml", "차단", "CI 변경은 PM 승인"],
+    ["planner", "packages/shared/src/rule.ts", "차단", "코드와 설정은 개발 담당"],
     // designer
     ["designer", "docs/design.md", "허용"],
     ["designer", "CLAUDE.md", "허용"],
@@ -596,6 +615,42 @@ describe("guard-bash: 명령 규칙과 Bash 파일 쓰기 (이슈 #17)", () => {
     ["developer", "cp -l supabase/tests/helpers/db.ts /tmp/h", "차단", ACCEPT],
     ["developer", "cp -a docs /tmp/docs-copy", "허용"],
     ["developer", "cp -l packages/shared/src/rule.ts /tmp/h", "허용"],
+    // 데이터 heredoc 본문(파일 내용·커밋 메시지·PR 본문)의 글자는 push·원격 DB 규칙에서 뺀다(이슈 #17 3단계 오탐)
+    [undefined, "cat > /tmp/note.md <<'EOF'\n- 막힌 명령: git push origin main\nEOF", "허용"],
+    [undefined, "cat <<'EOF' > /tmp/note.md\nsupabase db push --linked\nEOF", "허용"],
+    [undefined, "cat <<'EOF' | tee /tmp/note.md\ngit push --force origin x\nEOF", "허용"],
+    [undefined, "git commit -F - <<'EOF'\nchore: x\n\ngit push origin main 오탐 수정\nEOF", "허용"],
+    [undefined, "gh pr create --draft --body-file - <<'EOF'\nsupabase db push 차단\nEOF", "허용"],
+    [
+      undefined,
+      "cat > /tmp/a.md <<'EOF'\nx\nEOF\ngit push origin main",
+      "차단",
+      "main에 직접 push",
+    ],
+    [
+      undefined,
+      "cat > /tmp/a.sh <<'EOF' && git push origin main\nx\nEOF",
+      "차단",
+      "main에 직접 push",
+    ],
+    // 인터프리터·셸이 표준 입력으로 실행하는 heredoc은 계속 검사한다
+    [undefined, "bash <<'EOF'\ngit push origin main\nEOF", "차단", "main에 직접 push"],
+    [undefined, "cat <<'EOF' | bash\ngit push origin main\nEOF", "차단", "main에 직접 push"],
+    [undefined, "cat <<'EOF' | tee /tmp/x | sh\nsupabase db push\nEOF", "차단", "db push"],
+    [
+      undefined,
+      "python3 - <<'EOF'\nimport os\nos.system('supabase db push')\nEOF",
+      "차단",
+      "db push",
+    ],
+    [undefined, "ssh host <<'EOF'\nsupabase db push\nEOF", "차단", "db push"],
+    // 따옴표 없는 구분자는 셸이 본문의 $(…)·백틱을 실행하므로 남긴다
+    [undefined, "cat > /tmp/a <<EOF\n$(git push origin main)\nEOF", "차단", "main에 직접 push"],
+    [undefined, "cat > /tmp/a <<EOF\n`supabase db push`\nEOF", "차단", "db push"],
+    [undefined, "cat > /tmp/a <<'EOF'\n$(git push origin main) `supabase db push`\nEOF", "허용"],
+    [undefined, "cat > /tmp/a <<EOF\n$HOME 에서 git push origin main 금지\nEOF", "허용"],
+    // 트레일러 규칙은 명령 전체를 본다: 나눠서 실행하라고 안내한다
+    ["developer", "git log --grep 'Acceptance: qa' --oneline; git status", "차단", "나눠서"],
     ["designer", 'git commit -m "feat: x\n\nAcceptance: qa"', "차단", TRAILER],
     ["planner", 'git commit -m "docs: x\n\nAcceptance: qa"', "차단", TRAILER],
     ["qa", 'git commit -m "test: x\n\nAcceptance: qa"', "허용"],

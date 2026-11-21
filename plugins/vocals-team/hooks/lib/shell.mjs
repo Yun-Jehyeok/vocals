@@ -12,8 +12,9 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /**
- * @typedef {{ words: string[], redirects: { op: string, target: string }[], heredocs: string[], pipeIn: boolean }} Segment
+ * @typedef {{ words: string[], redirects: { op: string, target: string }[], heredocs: string[], heredocSpans: [number, number, boolean][], pipeIn: boolean }} Segment
  *   pipeIn: 앞 세그먼트와 파이프(|)로 이어져 표준 입력을 받는다
+ *   heredocSpans: heredoc 본문이 원문에서 차지하는 [시작, 끝) 위치(구분자 줄 제외)와, 셸이 본문의 명령 치환을 실행하는지
  * @typedef {{ path: string, kind: "write" | "tree", via: string }} Target
  *   kind: write = 그 경로 하나를 쓴다, tree = 그 경로와 아래 전체를 바꾸거나 지운다
  * @typedef {{ cwd: string, sub: string, args: string[], heredocs: string[], raw: string, config: string[], env: string[] }} CommitCall
@@ -21,7 +22,13 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
  */
 
 const newSegment = () =>
-  /** @type {Segment} */ ({ words: [], redirects: [], heredocs: [], pipeIn: false });
+  /** @type {Segment} */ ({
+    words: [],
+    redirects: [],
+    heredocs: [],
+    heredocSpans: [],
+    pipeIn: false,
+  });
 
 /** src[start]가 "("일 때 짝이 맞는 ")" 다음 위치. 따옴표와 heredoc 본문은 건너뛴다. */
 function skipBalanced(src, start) {
@@ -79,22 +86,31 @@ function skipDouble(src, start) {
   return i;
 }
 
-/** start부터 heredoc 본문들을 차례로 읽는다. */
+/** start부터 heredoc 본문들을 차례로 읽는다. spans는 본문마다 원문의 [시작, 끝) 위치 */
 function skipHeredocBodies(src, start, heredocs) {
   let i = start;
   const bodies = [];
+  /** @type {[number, number][]} */
+  const spans = [];
   for (const heredoc of heredocs) {
     const lines = [];
+    const bodyStart = i;
+    let bodyEnd = src.length;
     while (i < src.length) {
       const nl = src.indexOf("\n", i);
       const line = src.slice(i, nl === -1 ? src.length : nl);
+      const lineStart = i;
       i = nl === -1 ? src.length : nl + 1;
-      if ((heredoc.strip ? line.replace(/^\t+/, "") : line) === heredoc.delim) break;
+      if ((heredoc.strip ? line.replace(/^\t+/, "") : line) === heredoc.delim) {
+        bodyEnd = lineStart;
+        break;
+      }
       lines.push(line);
     }
     bodies.push(lines.join("\n"));
+    spans.push(/** @type {[number, number]} */ ([bodyStart, Math.max(bodyStart, bodyEnd)]));
   }
-  return { end: i, bodies };
+  return { end: i, bodies, spans };
 }
 
 /**
@@ -109,15 +125,16 @@ export function parseShell(src) {
   let seg = newSegment();
   let word = "";
   let inWord = false;
+  let quoted = false; // 단어에 따옴표·역슬래시가 있었나(heredoc 구분자가 따옴표면 본문을 펼치지 않는다)
   /** @type {string | null} */
   let pendingRedirect = null;
-  /** @type {{ delim: string, strip: boolean, seg: Segment }[]} */
+  /** @type {{ delim: string, strip: boolean, quoted: boolean, seg: Segment }[]} */
   const pendingHeredocs = [];
 
   const endWord = () => {
     if (!inWord) return;
     if (pendingRedirect === "<<" || pendingRedirect === "<<-") {
-      pendingHeredocs.push({ delim: word, strip: pendingRedirect === "<<-", seg });
+      pendingHeredocs.push({ delim: word, strip: pendingRedirect === "<<-", quoted, seg });
     } else if (pendingRedirect) {
       seg.redirects.push({ op: pendingRedirect, target: word });
     } else {
@@ -126,6 +143,7 @@ export function parseShell(src) {
     pendingRedirect = null;
     word = "";
     inWord = false;
+    quoted = false;
   };
   const endSegment = () => {
     endWord();
@@ -141,6 +159,7 @@ export function parseShell(src) {
       if (next !== "\n") {
         word += next ?? "";
         inWord = true;
+        quoted = true;
       }
       i += 2;
     } else if (c === "'") {
@@ -148,10 +167,12 @@ export function parseShell(src) {
       const stop = end === -1 ? src.length : end;
       word += src.slice(i + 1, stop);
       inWord = true;
+      quoted = true;
       i = stop + 1;
     } else if (c === '"') {
       i++;
       inWord = true;
+      quoted = true;
       while (i < src.length && src[i] !== '"') {
         const d = src[i];
         if (d === "\\" && '$`"\\\n'.includes(src[i + 1] ?? "")) {
@@ -187,8 +208,15 @@ export function parseShell(src) {
       endSegment();
       const heredocs = pendingHeredocs.splice(0);
       if (heredocs.length > 0) {
-        const { end, bodies } = skipHeredocBodies(src, i + 1, heredocs);
-        heredocs.forEach((heredoc, index) => heredoc.seg.heredocs.push(bodies[index] ?? ""));
+        const { end, bodies, spans } = skipHeredocBodies(src, i + 1, heredocs);
+        heredocs.forEach((heredoc, index) => {
+          const body = bodies[index] ?? "";
+          heredoc.seg.heredocs.push(body);
+          const span = spans[index];
+          // 따옴표 없는 구분자(<<EOF)면 셸이 본문의 $(…)·백틱을 실행한다
+          const live = !heredoc.quoted && /\$\(|`/.test(body);
+          if (span) heredoc.seg.heredocSpans.push([span[0], span[1], live]);
+        });
         i = end;
       } else {
         i++;
@@ -867,6 +895,56 @@ export function analyzeCommand(command, cwd, depth = 0) {
     }
   }
   return { targets, commits, pushes, opaque };
+}
+
+/**
+ * 표준 입력을 코드로 실행하지 않는 명령. 이 명령의 heredoc 본문은 데이터(파일 내용, 커밋 메시지, PR 본문)다.
+ * 인터프리터·셸(bash, python3, node, psql, ssh 등)은 넣지 않는다.
+ */
+const DATA_STDIN = new Set([
+  "cat",
+  "tee",
+  "git",
+  "gh",
+  "head",
+  "tail",
+  "grep",
+  "wc",
+  "sort",
+  "uniq",
+  "jq",
+  "diff",
+  "base64",
+  "true",
+  ":",
+]);
+
+/**
+ * 명령 규칙(push·원격 DB)을 원문 정규식으로 검사하기 전에 데이터 heredoc 본문을 뺀 원문을 만든다.
+ * `cat > 파일 <<'EOF'`, `git commit -F - <<'EOF'`처럼 본문이 실행되지 않는 heredoc만 뺀다.
+ * 인터프리터의 표준 입력이거나, 파이프로 데이터 명령이 아닌 곳(`cat <<EOF | bash`)에 넘어가면 남긴다.
+ * 따옴표 없는 구분자(<<EOF) 본문에 $(…)·백틱이 있으면 셸이 실행하므로 남긴다. $(…)·따옴표 안의 heredoc도 남긴다.
+ * @param {string} command
+ */
+export function stripDataHeredocs(command) {
+  const segments = parseShell(command);
+  const nameOf = (/** @type {Segment} */ seg) => basename(stripPrefix(seg.words)[0] ?? "");
+  /** @type {[number, number][]} */
+  const spans = [];
+  segments.forEach((seg, index) => {
+    if (seg.heredocSpans.length === 0 || !DATA_STDIN.has(nameOf(seg))) return;
+    for (let j = index + 1; j < segments.length; j++) {
+      const next = /** @type {Segment} */ (segments[j]);
+      if (!next.pipeIn) break;
+      if (!DATA_STDIN.has(nameOf(next))) return;
+    }
+    for (const [start, end, live] of seg.heredocSpans) if (!live) spans.push([start, end]);
+  });
+  let out = command;
+  for (const [start, end] of spans.sort((a, b) => b[0] - a[0])) {
+    out = out.slice(0, start) + out.slice(end);
+  }
+  return out;
 }
 
 /** 줄 첫머리의 `Acceptance:` 트레일러 */
