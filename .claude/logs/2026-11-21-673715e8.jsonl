@@ -2,3 +2,4 @@
 {"ts":"2026-11-21T05:08:01.002Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"supabase/migrations/"}
 {"ts":"2026-11-21T05:39:15.459Z","session":"673715e8","event":"block","rule":"qa.scope","role":"qa","tool":"Write","target":"supabase/migrations/20261122000000_bundle2.sql"}
 {"ts":"2026-11-21T10:32:57.724Z","session":"673715e8","event":"block","rule":"qa.scope","role":"qa","tool":"Bash","target":".claude/logs/2026-11-21-673715e8.jsonl"}
+{"ts":"2026-11-21T10:31:55.018Z","session":"673715e8","event":"block","rule":"qa.scope","role":"qa","tool":"Bash","target":"supabase/seed.sql"}
