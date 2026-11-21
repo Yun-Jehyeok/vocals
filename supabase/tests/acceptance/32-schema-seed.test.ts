@@ -340,6 +340,22 @@ describe("#32 seed의 차감 행과 회차 금액이 shared 함수와 맞는다 
     }
   });
 
+  // 판정 때 추가(#32): 위 테스트는 차감 행이 있는 수강권만 묶어서, 차감 행이 0개인 수강권은 보지 않았다.
+  // 환불된 수강권(end_reason = refunded)은 환불이 remaining_sessions를 줄이므로 이 식이 맞지 않는다.
+  // 기준이 정해질 때까지 빼고 본다(`[질문] 받는 역할: 기획`, PR #34 QA 판정).
+  it("ATT-02: 환불되지 않은 모든 수강권(차감 행 0개 포함)에서 차감 행 수 = total_sessions − remaining_sessions", async () => {
+    const { rows } = await db.query<{ id: string; expected: number; deducted: number }>(
+      `select t.id, t.total_sessions - t.remaining_sessions as expected,
+              (select count(*)::int from public.session_attendees a
+               where a.ticket_id = t.id and a.deducted) as deducted
+       from public.tickets t
+       where t.end_reason is distinct from 'refunded'
+       order by t.id`,
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.filter((row) => row.deducted !== row.expected)).toEqual([]);
+  });
+
   it("STL-02: 차감 행의 session_amount는 sessionAmount(차감 순서는 회차 시각 순)와 같다", async () => {
     const rows = await deductedRows();
     expect(rows.length).toBeGreaterThan(0);
