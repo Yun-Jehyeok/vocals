@@ -8,7 +8,7 @@
   - **(제안)**: PRD에 없고 Claude가 채워 넣은 항목.
   - **[결정 n]**: 이 문서 끝 "결정 필요" n번과 연결된 항목.
   - 모든 테이블에는 `id`(PK)와 `created_at`이 있다고 보고, 다이어그램에서는 꼭 필요할 때만 적는다. 다른 테이블과 1:1인 테이블(`trainer_profiles`, `user_private_profiles`, `user_account_records`, `trainer_business_profiles`)은 `id` 대신 가리키는 FK가 PK다.
-  - `id`는 uuid다. 운영자가 미리 넣는 기준 데이터(`regions`, `genres`)만 int 자동 증가다.
+  - `id`는 uuid다. 운영자·마이그레이션이 미리 넣는 기준 데이터(`regions`, `genres`, `fee_policies`)만 int 자동 증가다.
   - DB의 enum 타입 이름은 `<테이블>_<컬럼>`이다. 예: `users_role`, `trainer_profiles_approval_status`. 같은 값을 쓰는 컬럼도 테이블마다 타입을 따로 둔다(예: `lesson_products_lesson_type`과 `tickets_lesson_type`). enum 값은 이 문서와 `packages/shared/src/domain.ts`를 따른다.
   - enum 컬럼의 주석에는 값을 쉼표로 적고, 설명은 `—` 뒤에 붙인다.
 
@@ -127,7 +127,7 @@ erDiagram
 - `link_slug`는 서버가 만들고 아무도 바꿀 수 없다. (TRN-02)
 - 정지(`suspended`)된 트레이너도 자기 `trainer_profiles`, `trainer_genres` 등 프로필 내용을 고칠 수 있다. 공개 범위만 좁아진다. (ADM-02)
 - 탈퇴한 사용자(`users.status = withdrawn`)는 자기 정보를 고칠 수 없다: `users`의 닉네임·프로필 사진, 트레이너 프로필·장르·사업자 정보 모두. (AUTH-07)
-- 정지(`suspended`)된 트레이너의 프로필은 본인, 운영자, 그 트레이너와 수강 관계(`enrollments`)가 있는 학생만 본다. (ADM-02)
+- 정지(`suspended`)된 트레이너의 프로필은 본인, 운영자, 그 트레이너와 수강 관계(`enrollments`)가 있는 학생만 본다. 프로필 화면(S-01)에 함께 나오는 장르(`trainer_genres`)와 판매 중인 상품(`lesson_products`)도 같은 기준이다. (ADM-02)
 - 프로필 영상은 3개까지다. (TRN-07)
 - 지역은 시·도와 시·군·구 두 단계이고, 전국의 시·군·구를 모두 넣는다. 시·군·구는 시 단위로 두고 일반구(예: 성남시 분당구)로 나누지 않는다. 시·군·구가 없는 세종은 `sigungu = '세종특별자치시'`로 둔다. (TRN-08의 예시 "경기 성남시")
 - 트레이너의 사업자 유형(`trainer_business_profiles.business_type`)을 저장한다. 사업자등록이 없는 개인(`individual`)도 받는다. 사업자이면 사업자등록번호를 함께 저장한다.
@@ -185,7 +185,7 @@ erDiagram
         int total_sessions
         int remaining_sessions
         int price_paid "파일럿 무료면 0"
-        decimal fee_rate "결제 당시 수수료율"
+        decimal fee_rate "결제 당시 수수료율, 파일럿 무료면 없음"
         date valid_until "결제(발급)일 + 1년"
         uuid group_class_id FK "그룹이면 배정된 반"
         enum status "waiting_schedule, active, ended"
@@ -209,6 +209,7 @@ erDiagram
     }
 ```
 
+- `payments`는 학생 본인과 운영자만 본다. 트레이너는 학생이 낸 금액을 `tickets.price_paid`로 본다. (PAY-03)
 - 수강 관계는 학생·트레이너 쌍마다 하나다. 그 트레이너와 처음 결제(파일럿 링크면 가입)할 때 생기고, 그때의 유입 경로를 `source`에 남긴다. (PAY-04, MKT-06)
 - 파일럿 무료는 `pilot_free = true`인 수강 관계에만 적용된다. 파일럿 트레이너가 목록으로 받은 학생은 `source = marketplace`, `pilot_free = false`라서 결제한다. (PLT-02, PLT-07)
 - 수강권은 결제 당시의 상품 내용(유형, 횟수, 가격)과 수수료율을 복사해 둔다. 트레이너가 나중에 가격을 바꾸거나 수수료율이 바뀌어도 이미 산 수강권은 그대로다. (제안)
@@ -217,6 +218,11 @@ erDiagram
 - 환불하면 남은 회차가 취소되고 `remaining_sessions`가 0이 된다. 금액 계산 규칙은 나중에 정한다. (PAY-09~11)
 - 재결제하면 새 수강권이 생긴다. 1:1이면 기존 고정 일정을 새 수강권에 이어 붙여 회차를 만들고, 그룹이면 같은 그룹 반에 배정한다. (PAY-07)
 - 파일럿 무료 수강권은 트레이너가 `is_pilot = true`이고 수강 관계가 `pilot_free = true`일 때만 발급할 수 있다. 파일럿이 해제되면 이미 발급된 수강권은 그대로 쓰고, 새 수강권은 결제해야 한다. (PLT-03, PLT-05)
+- 파일럿 무료 수강권은 결제가 없어 복사할 수수료율이 없으므로 `fee_rate`를 비워 둔다. `price_paid = 0`이라 정산 항목도 생기지 않는다. (PLT-03, STL-06)
+- 상품은 지우지 않는다. 판매를 멈출 때는 `active = false`로 두고, 비활성 상품은 그 트레이너와 운영자만 본다. (TRN-03)
+- 상품 값: `session_count` ≥ 1, `price` > 0, `duration_min` > 0이고, 일회권(`single`)은 `session_count = 1`이다. (TRN-03, TRN-05, TRN-06)
+- 수강권 값: `total_sessions` ≥ 1, 0 ≤ `remaining_sessions` ≤ `total_sessions`, `price_paid` ≥ 0, 일회권은 `total_sessions = 1`, `end_reason`은 `status = ended`일 때만 있다. 수강권의 상품·그룹 반은 그 수강 관계의 트레이너 것이다. DB는 이 범위만 검사하고 금액을 계산하지 않는다. (PAY-03)
+- 환불 요청은 결제한(`payment_id` 있음) `waiting_schedule`·`active` 수강권에만 낼 수 있다(파일럿 무료·끝난 수강권 제외). 수강권마다 처리 대기(`requested`)인 것이 하나까지다. 학생은 요청을 철회하거나 고치지 않고, `processed`로 바꾸는 것은 서버다. (PAY-10, PAY-11)
 
 ## 4. 일정·출결
 
@@ -276,6 +282,10 @@ erDiagram
 ```
 
 - 그룹 반은 정원(`capacity`)이 차면 학생을 더 배정할 수 없다. 학생은 그룹 수강권을 결제할 수 있고, 트레이너가 자리가 있는 반에 배정한다.
+  - 정원은 그 반에 끝나지 않은 수강권으로 배정된 **서로 다른 학생 수**로 센다. 재결제(PAY-07)로 같은 학생의 수강권이 둘이어도 한 명이다. 정원을 배정된 학생 수보다 작게 줄일 수 없다. (TRN-04)
+  - 반은 상품과 연결하지 않는다. 같은 반에 회차가 다른 수강권이 섞일 수 있고, 배정할 수 있는 것은 그 트레이너의 `lesson_type = group`이고 `ended`가 아닌 수강권이다. (TRN-04)
+  - 배정은 트레이너가 수강권의 `group_class_id`를 바꾸는 것이다. 반은 그 트레이너, 운영자, 그 반에 배정된 수강권이 있는 학생만 본다. (TRN-04)
+  - 수강권이 배정된 반은 지울 수 없다. 배정된 수강권이 없으면 트레이너가 지울 수 있다. (TRN-04)
 - 고정 일정은 1:1이면 수강권에, 그룹이면 그룹 반에 붙는다. 주 여러 요일은 `fixed_schedule_slots` 여러 줄이다. (SCH-01, TRN-04)
 - 고정 일정을 수정하면 기존 일정의 `effective_to`를 수정일로 닫고 새 일정을 만든다. 수정일 이후의 `scheduled` 회차만 지우고 새 일정으로 다시 만든다. 지난 회차와 출결은 그대로 남는다. (SCH-04)
 - 회차 하나에 학생이 여러 명일 수 있어서(그룹), 출결은 회차가 아니라 `session_attendees`에 학생별로 둔다. (ATT-03)
@@ -390,6 +400,7 @@ erDiagram
 - 차감된 출결(`deducted = true`) 한 줄이 정산 항목 한 줄이 된다. 그 달에 차감된 항목을 모아 다음 달에 지급한다. (STL-02, STL-04)
 - 수수료율은 유입 경로별로 `fee_policies`에 두고, 결제할 때 그 값을 수강권의 `tickets.fee_rate`에 복사한다. `tickets`는 `fee_policies`를 FK로 가리키지 않는다(3장 "결제 당시의 수수료율을 복사해 둔다"). 마켓플레이스 수수료율은 아직 정하지 않았다(`docs/idea.md` 결정 필요 4). (STL-03)
 - 파일럿 무료 수강권(`price_paid = 0`)은 정산 항목을 만들지 않는다. (STL-06)
+- `fee_policies`는 운영자만 읽고, 쓰기는 마이그레이션·서버만 한다(수수료율 설정 화면 없음). `trainer_link` 0.08은 마이그레이션의 기준 데이터로 넣는다. `marketplace` 행은 결정 필요 4가 정해질 때까지 운영 데이터에 넣지 않는다(개발용 seed에만 더미). 같은 `source`·`effective_from` 행은 하나다. (STL-03)
 - 개인 트레이너(`trainer_business_profiles.business_type = individual`)에게 지급할 때는 3.3%를 원천징수해 `withholding_tax`에 기록하고 그만큼 빼고 지급한다. (STL-07)
 - 정산이 `confirmed`가 되면 그 달의 출결은 더 고칠 수 없다. (ATT-06)
 - 트레이너가 끝까지 체크하지 않은 출결(`none`)은 자동으로 바꾸지 않고, 정산되지 않는다.
