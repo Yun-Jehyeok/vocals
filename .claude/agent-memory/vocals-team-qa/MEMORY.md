@@ -16,3 +16,6 @@
 - 여러 단계 우회(배정 해제 → 반 삭제)는 `withActor` 안에서 단계마다 `savepoint`/`rollback to savepoint`로 시도하고 단계별 영향 행 수를 함께 단언한다(#32).
 - fixture SQL 검증: /tmp 복사본 seed에 임시 DDL을 붙여 준비 데이터가 들어가는지만 본다. 복사본에서 `cd` 뒤 상대 경로로 seed를 쓰거나 `.claude/logs`에 쓰면 QA 훅이 막는다. 막히면 다시 시도하지 않고, 복사본에 남은 차단 로그는 보고에 적는다(레포 로그는 훅이 직접 쓰므로 그것만 커밋)(#32).
 - 정책 본문 검사는 "private 함수를 부른다"까지 요구하지 않는다(#28 refund_requests처럼 다른 테이블 RLS를 거치는 exists도 허용). "enrollments·tickets·group_classes 직접 조회 없음"만 본다(#32).
+- 같은 사람을 쓰는 다음 묶음은 앞 묶음 fixture 위에 쌓는다(`createBundle4Db` = `createBundle3Db` + 새 행, #35). 앞 fixture의 id·준비 작업을 re-export해서 쓴다.
+- 테이블이 없을 때도 참인 단언(정책 for-loop, "컬럼 없음", "트리거 없음")은 개발 전에도 통과한다. 반드시 "정책이 있다"·"컬럼 일치" 같은 짝 테스트를 같이 두고 PR에 통과 수의 이유를 적는다(#35).
+- 매트릭스 `attempt`는 트리거 거부(P0001)를 던진다. 클라이언트 칸의 시도 SQL은 RLS로 막히는 값(남의 id)만 쓰고, "본인 id로 남의 대상에 쓰기"는 `attemptWrite`로 따로 둔다(#35).
