@@ -108,6 +108,7 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
     ]);
     for (const fn of [
       "is_admin",
+      "is_active_user",
       "user_role",
       "trainer_approval_status",
       "trainer_can_edit_business_info",
