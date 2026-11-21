@@ -1,6 +1,14 @@
 import type { PGlite, Transaction } from "@electric-sql/pglite";
 import {
   BUSINESS_TYPES,
+  ENROLLMENT_SOURCES,
+  LESSON_TYPES,
+  PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  REFUND_REQUEST_STATUSES,
+  TICKET_END_REASONS,
+  TICKET_STATUSES,
+  TICKET_TYPES,
   TRAINER_APPROVAL_STATUSES,
   USER_ROLES,
   USER_STATUSES,
@@ -47,9 +55,23 @@ const DOMAIN_ENUMS: Record<string, readonly string[]> = {
   users_status: USER_STATUSES,
   trainer_profiles_approval_status: TRAINER_APPROVAL_STATUSES,
   trainer_business_profiles_business_type: BUSINESS_TYPES,
+  lesson_products_lesson_type: LESSON_TYPES,
+  lesson_products_ticket_type: TICKET_TYPES,
+  enrollments_source: ENROLLMENT_SOURCES,
+  payments_method: PAYMENT_METHODS,
+  payments_status: PAYMENT_STATUSES,
+  tickets_lesson_type: LESSON_TYPES,
+  tickets_ticket_type: TICKET_TYPES,
+  tickets_status: TICKET_STATUSES,
+  tickets_end_reason: TICKET_END_REASONS,
+  refund_requests_status: REFUND_REQUEST_STATUSES,
+  fee_policies_source: ENROLLMENT_SOURCES,
 };
 
-/** docs/erd.md 2장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다. */
+/**
+ * docs/erd.md 2·3·4·6장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다.
+ * 4·6장은 이슈 #28에서 만든 group_classes, fee_policies만.
+ */
 const ERD_COLUMNS: Record<string, string[]> = {
   users: ["id", "role", "nickname", "profile_image_url", "status", "created_at"],
   user_private_profiles: ["user_id", "legal_name", "birth_date", "phone", "created_at"],
@@ -79,6 +101,60 @@ const ERD_COLUMNS: Record<string, string[]> = {
   regions: ["id", "sido", "sigungu", "created_at"],
   genres: ["id", "name", "created_at"],
   trainer_genres: ["id", "trainer_id", "genre_id", "created_at"],
+  lesson_products: [
+    "id",
+    "trainer_id",
+    "lesson_type",
+    "ticket_type",
+    "session_count",
+    "price",
+    "duration_min",
+    "active",
+    "created_at",
+  ],
+  enrollments: ["id", "student_id", "trainer_id", "source", "pilot_free", "created_at"],
+  payments: [
+    "id",
+    "student_id",
+    "product_id",
+    "amount",
+    "method",
+    "pg_transaction_id",
+    "status",
+    "paid_at",
+    "created_at",
+  ],
+  tickets: [
+    "id",
+    "enrollment_id",
+    "product_id",
+    "payment_id",
+    "lesson_type",
+    "ticket_type",
+    "total_sessions",
+    "remaining_sessions",
+    "price_paid",
+    "fee_rate",
+    "valid_until",
+    "group_class_id",
+    "status",
+    "end_reason",
+    "created_at",
+  ],
+  refund_requests: ["id", "ticket_id", "reason", "status", "created_at"],
+  refunds: [
+    "id",
+    "ticket_id",
+    "payment_id",
+    "refund_request_id",
+    "sessions_canceled",
+    "amount",
+    "processed_by",
+    "processed_at",
+    "created_at",
+  ],
+  group_classes: ["id", "trainer_id", "name", "capacity", "duration_min", "created_at"],
+  fee_policies: ["id", "source", "rate", "effective_from", "created_at"],
 };
 
 describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
@@ -113,11 +189,29 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "trainer_approval_status",
       "trainer_can_edit_business_info",
       "generate_link_slug",
+      // 이슈 #28
+      "has_enrollment_with",
+      "is_own_student",
+      "is_enrollment_member",
+      "enrollment_trainer_id",
+      "enrollment_student_id",
+      "lesson_product_trainer_id",
+      "group_class_trainer_id",
+      "is_assigned_to_group_class",
+      "group_class_student_count",
+      "can_request_refund",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(true);
     }
     // 트리거 함수는 트리거로만 실행된다.
-    expect(byName["trainer_profiles_before_write"]?.authenticated).toBe(false);
+    for (const fn of [
+      "trainer_profiles_before_write",
+      "lesson_products_before_update",
+      "group_classes_before_update",
+      "tickets_before_write",
+    ]) {
+      expect(byName[fn]?.authenticated, fn).toBe(false);
+    }
   });
 
   it("anon은 SECURITY DEFINER 함수로 비공개 프로필의 승인 상태를 알아낼 수 없다", async () => {
@@ -155,7 +249,7 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
     ).rejects.toThrow(/foreign key/);
   });
 
-  it("테이블과 컬럼 이름이 erd 2장과 같고 모두 created_at이 있다", async () => {
+  it("테이블과 컬럼 이름이 erd와 같고 모두 created_at이 있다", async () => {
     const { rows } = await db.query<{ table_name: string; column_name: string }>(
       `select table_name, column_name
        from information_schema.columns
