@@ -54,7 +54,8 @@ describe.each(PRIVATE_TABLES)("%s 읽기", (table) => {
     expect(rows).toEqual([]);
   });
 
-  it("트레이너는 학생의 행을 읽을 수 없다 (수강생 열람은 묶음 2) — AUTH-09", async () => {
+  // 자기 학생 열람(AUTH-09)은 tests/acceptance/28-carryover-10.test.ts. seed의 승인 트레이너에게는 학생이 없다.
+  it("자기 학생이 없는 트레이너는 학생의 행을 읽을 수 없다 — AUTH-09", async () => {
     const { rows } = await queryAs<{ user_id: string }>(
       db,
       trainer,
