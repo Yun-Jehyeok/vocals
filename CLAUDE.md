@@ -13,6 +13,7 @@
 - `docs/screens.md` — 화면 목록 (`S-` 학생, `T-` 트레이너, `A-` 운영자, `C-` 공통)
 - `docs/erd.md` — 데이터 모델. 테이블·컬럼·enum의 영문 이름
 - `docs/tech-stack.md` — 기술 스택과 보안 원칙
+- `docs/decisions.md` — PM·팀장이 정한 것의 결정 로그(날짜·이유·출처). PM에게 묻기 전에 먼저 확인한다
 
 ## 현재 범위
 
