@@ -254,7 +254,7 @@ erDiagram
     }
     fixed_schedule_slots {
         uuid fixed_schedule_id FK
-        int weekday "0~6"
+        int weekday "0~6 (0 = 일요일)"
         time start_time
     }
     lesson_sessions {
@@ -296,6 +296,21 @@ erDiagram
 - 보강은 `kind = makeup`인 회차다. 그룹 반 학생도 개별 보강 회차로 잡는다. (SCH-08)
 - `session_amount`는 차감 시점에 채운다. 기본값은 `floor(price_paid ÷ total_sessions)`이고, 그 수강권의 마지막 차감(`remaining_sessions`가 0이 되는 차감)에는 나머지 `price_paid − 기본값 × total_sessions`를 더한다. 그래서 한 수강권의 회차 금액을 모두 더하면 결제 금액과 같다. 정산은 이 값을 모은다. 계산은 `packages/shared`의 함수로 한다. (STL-02)
 - 일회권은 `kind = single` 회차 하나다. (SCH-02)
+- 시각과 요일 (SCH-01, SCH-09)
+  - 회차 `starts_at`·`ends_at`은 시간대가 있는 시각(Postgres `timestamptz`)으로 저장한다.
+  - 요일, 고정 일정의 `start_time`·`effective_from`·`effective_to`, 화면 표시는 Asia/Seoul 기준이다.
+  - `weekday`는 0 = 일요일 ~ 6 = 토요일이다(Postgres `extract(dow)`, JavaScript `Date.getDay()`와 같은 기준).
+- 쓰기 경로 (SCH-01~SCH-08, ATT-02~ATT-05, STL-02)
+  - 고정 일정·요일, 회차 만들기·취소·삭제, 참여 행(출결 체크, 학생 사전 취소, `deducted`, `session_amount`)은 서버 함수가 쓴다.
+  - 클라이언트가 직접 쓰는 것은 트레이너의 회차 시간(`starts_at`·`ends_at`) 변경뿐이다.
+- 학생은 자기 참여 행이 있는 회차와 자기 참여 행만 본다. 같은 반 다른 학생의 출결은 보지 않는다. (SCH-09, ATT-05)
+- 트레이너는 자기 회차 중 `status = scheduled`이고 차감된 참여 행이 없는 회차의 시간만 바꾼다. 정지된 트레이너도 바꿀 수 있고, 탈퇴한 트레이너는 못 바꾼다. (SCH-03, ADM-02, AUTH-07)
+- 회차는 차감된 참여 행이 없을 때만 서버가 지우고, 참여 행도 함께 지워진다. 차감된 참여 행이 있는 회차는 지울 수 없다. (SCH-04, STL-02)
+- DB 제약으로 값의 범위와 관계를 지킨다. 출결에 따른 차감 여부와 금액은 DB가 계산·검사하지 않는다(공유 규칙 함수가 한다). (SCH-01, SCH-02, ATT-03, STL-02)
+  - 고정 일정은 `ticket_id`·`group_class_id` 중 정확히 하나를 가리키고, `ticket_id`는 1:1 정기권만이다. `effective_to`는 비었거나 `effective_from` 이후다.
+  - 같은 고정 일정에 같은 요일·시작 시각은 하나다. 회차는 `ends_at` > `starts_at`이고 `mode = offline`만이다.
+  - `kind = regular`이면 `fixed_schedule_id`가 있고, `single`·`makeup`이면 `fixed_schedule_id`·`group_class_id`가 없다. 회차의 트레이너·반은 고정 일정의 것과 같다.
+  - 참여 행은 (회차, 학생)마다 하나이고, 수강권의 학생·트레이너·유형이 회차와 맞아야 한다. `canceled_by`는 `pre_canceled`일 때만 있다. `session_amount`는 0 이상이고 `deducted = false`이면 비어 있다.
 
 ## 5. 숙제·영상·피드백
 
@@ -517,8 +532,16 @@ erDiagram
 
 ## 10. 결정 필요
 
-이 문서에서 새로 생긴 항목은 없다. 데이터 모델에 영향을 주는(★) 남은 항목은 다른 문서에서 다루고, 정해지면 이 문서에 반영한다.
+데이터 모델에 영향을 주는(★) 남은 항목은 다른 문서에서 다루고, 정해지면 이 문서에 반영한다. 이 문서에서 생긴 항목은 아래 "4장 일정·출결"에 모았다.
 
 - `docs/prd.md` 결정 필요 3 — 트레이너 정지 시 기존 학생·수강권 처리 (3장. 프로필 공개 범위는 2장에 정했다)
 - `docs/idea.md` 결정 필요 2 — 환불 세부 규칙 (`refunds.amount` 계산, 3장)
 - `docs/idea.md` 결정 필요 4 — 마켓플레이스 유입 학생의 수수료율 (`fee_policies`의 `marketplace` 값, 6장)
+
+### 4장 일정·출결 — 서버 함수 이슈에서 정할 것 (#32에서 넘김)
+
+- 그룹 반 회차를 몇 개, 언제까지 만드나. SCH-01은 "수강권 횟수만큼"인데 반에는 횟수가 없고 회차가 다른 수강권이 섞인다.
+- 반 배정·해제 때 이후 그룹 회차의 참여 행을 누가 어떻게 맞추나(배정은 클라이언트 직접, 결정 로그 2026-11-21).
+- 1:1 재결제 때 "기존 고정 일정을 새 수강권에 이어 붙인다"(3장, PAY-07)가 새 `fixed_schedules` 행인지, 기존 일정에 새 수강권 참여 행을 만드는 것인지.
+- 1:1 회차 길이(`ends_at`)의 기준(상품 `duration_min` 등).
+- 출결 수정(ATT-06) 때 차감 되돌리기와 `session_amount` 재계산(마지막 차감의 나머지). 금액 계산 로직이라 PM 승인이 필요하다.

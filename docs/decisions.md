@@ -12,6 +12,10 @@ PM과 팀장이 정한 것을 한 줄씩 모은다. 요구사항 문장은 `docs
 
 | 날짜 | 결정 | 이유 | 되돌릴 수 있음 | 결정한 사람 | 출처 |
 | --- | --- | --- | --- | --- | --- |
+| 2026-11-21 | 회차 `starts_at`·`ends_at`은 `timestamptz`로 저장하고, 요일·고정 일정 시각·화면 표시는 Asia/Seoul 기준. `weekday`는 0 = 일요일 ~ 6 = 토요일 (후보 5, 추가) | 문서 빈 곳. Postgres `extract(dow)`·JS `getDay()`와 같은 기준이라 변환이 없음 | 예 | 팀장 | [#32](https://github.com/Yun-Jehyeok/vocals/issues/32) |
+| 2026-11-21 | 고정 일정·회차 만들기·취소·삭제·출결(사전 취소·차감·회차 금액)은 서버 함수가 쓴다. 클라이언트 직접 쓰기는 트레이너의 회차 시간 변경뿐이고, `scheduled`이며 차감된 참여 행이 없는 회차만 된다. 정지 트레이너도 된다 (후보 1·6) | 차감·금액·24시간 마감은 공유 규칙 함수라 DB에 다시 만들지 않음. 차감된 회차의 시간을 바꾸면 정산 월이 흐려짐 | 예 | 팀장 | [#32](https://github.com/Yun-Jehyeok/vocals/issues/32) |
+| 2026-11-21 | 학생은 자기 참여 행이 있는 회차와 자기 참여 행만 본다 (후보 2) | S-10·S-11은 자기 회차·출결만 보여 주고, 다른 학생 출결 공개는 개인정보 공개 범위 문제 | 예 | 팀장 | [#32](https://github.com/Yun-Jehyeok/vocals/issues/32) |
+| 2026-11-21 | 일정·출결 세 테이블에 값 범위·관계 DB 제약을 건다(차감·금액은 검사 안 함). 회차는 차감된 참여 행이 없을 때만 서버가 지우고 참여 행도 함께 지워진다 (후보 3·4) | 서버 함수 버그가 차감·정산으로 번지는 것을 막고, 차감 기록은 정산이 가리킴 | 예 | 팀장 | [#32](https://github.com/Yun-Jehyeok/vocals/issues/32) |
 | 2026-11-21 | 학생이 앱에서 환불을 요청할 수 있는 수강권은 결제한 수강권 중 `waiting_schedule`·`active`만이다(파일럿 무료·끝난 수강권 제외) | 파일럿 무료는 돌려줄 금액이 없고, 만료 회차 처리는 `docs/idea.md` 결정 필요 2에서 정함 | 예 | PM | [#28](https://github.com/Yun-Jehyeok/vocals/issues/28) |
 | 2026-11-21 | 트레이너는 `payments`(결제 수단·PG 거래번호·결제 시각)를 보지 않는다. 학생이 낸 금액은 `tickets.price_paid`로 본다 | T-08·T-20·T-22에 필요한 것은 수강권으로 충분하고, 학생 결제 정보는 최소로 연다 | 예 | PM | [#28](https://github.com/Yun-Jehyeok/vocals/issues/28) |
 | 2026-11-21 | 상품은 지우지 않고 `active = false`로 판매 중지한다. 비활성 상품은 그 트레이너·운영자만 본다 (후보 1) | `payments`·`tickets`가 상품을 가리키고, 학생에게 보일 이유가 없음 | 예 | 팀장 | [#28](https://github.com/Yun-Jehyeok/vocals/issues/28) |
