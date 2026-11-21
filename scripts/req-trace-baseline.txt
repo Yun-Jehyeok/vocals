@@ -1,6 +1,5 @@
 # 요구사항 추적 기준선 — 아직 이름에 이 ID가 들어간 테스트가 없는 요구사항 (이슈 #17)
 # 줄어들기만 한다. 테스트를 추가했으면 `pnpm check:req-trace --update`로 지운다.
-TRN-07
 TRN-09
 PAY-02
 PAY-06
@@ -11,20 +10,6 @@ PLT-06
 PLT-07
 SCH-07
 ATT-04
-HW-01
-HW-02
-HW-03
-HW-04
-HW-05
-HW-06
-HW-07
-HW-08
-HW-09
-HW-10
-HW-11
-HW-12
-HW-13
-HW-14
 CHAT-01
 CHAT-02
 CHAT-03
@@ -59,6 +44,4 @@ ADM-04
 ADM-05
 NFR-01
 NFR-02
-NFR-03
-NFR-04
 NFR-05

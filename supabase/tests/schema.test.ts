@@ -17,6 +17,9 @@ import {
   TRAINER_APPROVAL_STATUSES,
   USER_ROLES,
   USER_STATUSES,
+  VIDEO_PURPOSES,
+  VIDEO_UPLOAD_STATUSES,
+  VIDEO_VISIBILITIES,
 } from "@vocals/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { anon, createTestDb, queryAs, service, withActor } from "./helpers/db.ts";
@@ -76,10 +79,14 @@ const DOMAIN_ENUMS: Record<string, readonly string[]> = {
   lesson_sessions_status: LESSON_SESSION_STATUSES,
   session_attendees_attendance: ATTENDANCE_STATUSES,
   session_attendees_canceled_by: CANCELED_BY,
+  // 이슈 #35
+  videos_purpose: VIDEO_PURPOSES,
+  videos_upload_status: VIDEO_UPLOAD_STATUSES,
+  videos_visibility: VIDEO_VISIBILITIES,
 };
 
 /**
- * docs/erd.md 2·3·4·6장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다.
+ * docs/erd.md 2·3·4·5·6장 컬럼 (id 또는 1:1 FK PK, created_at 포함). 로그인 수단은 Supabase Auth가 저장한다.
  * 4장은 이슈 #28·#32, 6장은 이슈 #28에서 만든 fee_policies만.
  */
 const ERD_COLUMNS: Record<string, string[]> = {
@@ -198,6 +205,35 @@ const ERD_COLUMNS: Record<string, string[]> = {
     "checked_at",
     "created_at",
   ],
+  // 이슈 #35: erd 2장 trainer_profile_videos, 5장
+  videos: [
+    "id",
+    "owner_id",
+    "purpose",
+    "storage_key",
+    "duration_sec",
+    "upload_status",
+    "visibility",
+    "hidden_in_library",
+    "ticket_id",
+    "purge_after",
+    "purge_notified_at",
+    "created_at",
+  ],
+  homeworks: ["id", "session_id", "trainer_id", "description", "due_at", "created_at"],
+  homework_targets: ["id", "homework_id", "student_id", "created_at"],
+  homework_videos: ["id", "homework_id", "video_id", "created_at"],
+  submissions: [
+    "id",
+    "homework_id",
+    "student_id",
+    "video_id",
+    "question",
+    "submitted_at",
+    "created_at",
+  ],
+  feedback_comments: ["id", "submission_id", "author_id", "body", "at_sec", "created_at"],
+  trainer_profile_videos: ["id", "trainer_id", "video_id", "sort_order", "created_at"],
 };
 
 describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
@@ -250,6 +286,10 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "lesson_session_trainer_id",
       "is_session_attendee",
       "session_has_deducted_attendee",
+      // 이슈 #35
+      "homework_trainer_id",
+      "is_homework_target",
+      "can_read_homework_video",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(true);
     }
