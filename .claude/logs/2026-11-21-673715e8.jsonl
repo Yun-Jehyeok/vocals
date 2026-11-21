@@ -7,3 +7,4 @@
 {"ts":"2026-11-21T10:45:55.790Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"supabase/migrations/"}
 {"ts":"2026-11-21T14:08:59.655Z","session":"673715e8","event":"block","rule":"planner.scope","role":"planner","tool":"Bash","target":"packages/shared"}
 {"ts":"2026-11-21T14:13:52.763Z","session":"673715e8","event":"block","rule":"commit.message-source","role":"planner","tool":"Bash","target":null}
+{"ts":"2026-11-21T15:42:52.074Z","session":"673715e8","event":"block","rule":"qa.scope","role":"qa","tool":"Bash","target":"20261122090000_client_insert_authorization.sql"}
