@@ -12,3 +12,6 @@
 - 차감 행 수 = `total_sessions − remaining_sessions`를 seed 테스트가 본다. 환불된 수강권(remaining 0)에는 차감 행을 두지 않는다(#32).
 - "끝난 수강권은 클라이언트가 못 고친다" 같은 규칙은 트리거에서 역할을 보지 말고 RLS using에 `status <> 'ended'`를 더한다. service_role은 RLS를 거치지 않아 서버 경로가 자동으로 열린다(#31).
 - 자식 테이블 읽기는 `exists (select 1 from <부모> where ...)`로 부모 RLS를 그대로 거치게 하면 판정이 한 곳에 모인다(trainer_genres, refund_requests·refunds → tickets). 행 잠금이 필요한 private 함수는 `volatile`이어야 한다(stable에서 FOR UPDATE 불가)(#28).
+- Postgres는 BEFORE 트리거 뒤에 RLS WITH CHECK를 본다. 클라이언트가 쓰는 테이블의 무결성 트리거가 쓰는 사람의 RLS로 읽으면, 권한 없는 사람의 바른 값 시도가 42501이 아니라 P0001로 끝나 매트릭스(attempt)가 판정을 못 한다. 그런 트리거 함수는 `security definer`(실행 권한은 아무에게도 안 줌)로 읽는다(#35).
+- 새 테이블·enum을 만들면 `supabase/tests/schema.test.ts`의 `ERD_COLUMNS`·`DOMAIN_ENUMS`·실행 권한 목록, 테이블 단위 DELETE를 주면 `qa-boundaries.test.ts` 목록에 더한다(#35).
+- `gh issue view`·`gh pr view`는 GraphQL이라 403이다. `gh api repos/Yun-Jehyeok/vocals/issues/<n>`·`.../issues/<n>/comments`·`.../pulls/<n>`(REST)로 읽는다(#35).
