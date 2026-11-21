@@ -19,3 +19,5 @@
 - 같은 사람을 쓰는 다음 묶음은 앞 묶음 fixture 위에 쌓는다(`createBundle4Db` = `createBundle3Db` + 새 행, #35). 앞 fixture의 id·준비 작업을 re-export해서 쓴다.
 - 테이블이 없을 때도 참인 단언(정책 for-loop, "컬럼 없음", "트리거 없음")은 개발 전에도 통과한다. 반드시 "정책이 있다"·"컬럼 일치" 같은 짝 테스트를 같이 두고 PR에 통과 수의 이유를 적는다(#35).
 - 매트릭스 `attempt`는 트리거 거부(P0001)를 던진다. 클라이언트 칸의 시도 SQL은 RLS로 막히는 값(남의 id)만 쓰고, "본인 id로 남의 대상에 쓰기"는 `attemptWrite`로 따로 둔다(#35).
+- 판정 시작 전 `git fetch origin '+refs/heads/<브랜치>:refs/remotes/origin/<브랜치>'`로 PR head를 직접 받는다. 그냥 `git fetch`로는 원격 브랜치가 갱신되지 않을 때가 있다(#35, head sha는 `gh api .../pulls/<n> --jq .head.sha`로 대조).
+- 무결성 트리거를 security definer로 두면 BEFORE 트리거가 RLS보다 먼저 돌아 권한 없는 사람에게 오류 코드(23514 vs 42501)로 관계가 샌다. 반려 사유는 아니지만 판정 때 카탈로그(prosecdef·proconfig·실행 권한)와 함께 보고한다(#35).
