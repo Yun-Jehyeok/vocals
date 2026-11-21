@@ -86,7 +86,7 @@ describe("카탈로그 검사 (tech-stack 3.11, CLAUDE.md 보안)", () => {
     ).toEqual([]);
   });
 
-  it("authenticated의 테이블 단위 쓰기 권한은 trainer_genres·group_classes DELETE뿐이다 (나머지는 컬럼 단위)", async () => {
+  it("authenticated의 테이블 단위 쓰기 권한은 trainer_genres·group_classes·trainer_profile_videos DELETE뿐이다 (나머지는 컬럼 단위)", async () => {
     const { rows } = await db.query<{ table_name: string; privilege_type: string }>(
       `select table_name, privilege_type from information_schema.role_table_grants
        where table_schema = 'public' and grantee = 'authenticated' and privilege_type <> 'SELECT'
@@ -96,6 +96,8 @@ describe("카탈로그 검사 (tech-stack 3.11, CLAUDE.md 보안)", () => {
     expect(rows).toEqual([
       { table_name: "group_classes", privilege_type: "DELETE" },
       { table_name: "trainer_genres", privilege_type: "DELETE" },
+      // trainer_profile_videos: 트레이너가 프로필에서 영상을 뺀다(#35, TRN-07, T-03)
+      { table_name: "trainer_profile_videos", privilege_type: "DELETE" },
     ]);
   });
 

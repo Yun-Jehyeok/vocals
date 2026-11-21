@@ -70,5 +70,17 @@ export type CanceledBy = (typeof CANCELED_BY)[number];
 export const BUSINESS_TYPES = ["individual", "sole_proprietor", "corporation"] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];
 
+/** 영상 용도 (HW-04, HW-06, TRN-07). DB enum `videos_purpose` */
 export const VIDEO_PURPOSES = ["profile", "example", "practice"] as const;
 export type VideoPurpose = (typeof VIDEO_PURPOSES)[number];
+
+/** 영상 업로드 상태 (HW-09). DB enum `videos_upload_status`. 서버(업로드 완료 처리)가 바꾼다 */
+export const VIDEO_UPLOAD_STATUSES = ["uploading", "ready", "failed"] as const;
+export type VideoUploadStatus = (typeof VIDEO_UPLOAD_STATUSES)[number];
+
+/** 영상 공개 범위 (HW-12). DB enum `videos_visibility`. 1단계는 private만(erd 9장) */
+export const VIDEO_VISIBILITIES = ["private"] as const;
+export type VideoVisibility = (typeof VIDEO_VISIBILITIES)[number];
+
+/** 영상 최대 길이(초) (HW-08, TRN-07: 5분). DB 제약 `videos_duration_sec_check`와 같다 */
+export const MAX_VIDEO_DURATION_SEC = 300;
