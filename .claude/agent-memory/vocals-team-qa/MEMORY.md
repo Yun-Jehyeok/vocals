@@ -29,3 +29,4 @@
 - 기존 테이블 쓰기를 새 상태(이용 제한 등)로 막는 조건은 허용 짝을 "같은 시도 + 그 상태만 푼 setup"(liftG)으로 둔다. 다른 사람으로 짝을 두면 거부 원인이 제한인지 가리지 못한다(#45).
 - 하네스 PR 판정: main 훅과 PR 훅에 같은 명령을 표준 입력 JSON으로 넣어 비교하고, main의 훅 테스트 파일을 PR 훅에 그대로 돌린다. 훅 우회 명령을 여러 줄 heredoc으로 넘기면 QA 세션의 훅에 막히므로 케이스는 Write로 /tmp 파일에 쓴다(#48).
 - 훅 허용을 넓히는 PR은 "읽기 도구"로 본 명령의 경로 값 옵션(--cache-location, --generateTrace, --tsBuildInfoFile, coverage.reportsDirectory 등)과 쓰기 API를 감싼 print/log까지 우회 시도한다. 보호 경로가 든 /tmp 복사본은 rm -rf가 훅에 막히므로 새 디렉터리 이름으로 복사한다(#48).
+- 허용 목록 훅을 판정할 때는 목록 안 명령의 위험한 하위 명령(gh alias·download·clone), 인자를 그대로 돌려주는 함수(str.strip·split·encode), 도구가 읽는 환경 변수(vitest UPDATE_SNAPSHOT)를 먼저 우회 시도한다(#48 3차).
