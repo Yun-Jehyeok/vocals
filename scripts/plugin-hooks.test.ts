@@ -959,6 +959,65 @@ describe("guard-bash: #48 새 허용으로 열린 우회 (QA 재현)", () => {
       "차단",
     ],
     ["developer", 'pnpm check && bash -c "$X" docs/prd.md', "차단"],
+    // 2차 재판정(bae3a23): 글 자리(print·log·write) 안에서 부른 쓰기 호출
+    ["developer", "python3 -c \"print(open('x'.replace('x', 'docs/prd.md'), 'w'))\"", "차단"],
+    [
+      "developer",
+      "node -e \"console.log(require('fs').writeFileSync('a'.replace('a', 'docs/prd.md'), 'x'))\"",
+      "차단",
+    ],
+    // 2차: 읽기 모드 도구의 쓰기 옵션(트레이스·캐시·커버리지 파일을 실제로 쓴다)
+    ["developer", "pnpm exec tsc --noEmit --generateTrace docs", "차단"],
+    ["developer", "pnpm exec tsc --noEmit --incremental --tsBuildInfoFile docs/prd.md", "차단"],
+    ["developer", "pnpm exec tsc --noEmit --generateCpuProfile docs/prd.md", "차단"],
+    ["developer", "pnpm exec vitest run --coverage --coverage.reportsDirectory docs", "차단"],
+    ["developer", "pnpm exec eslint --cache --cache-location docs/prd.md .", "차단"],
+    ["developer", "pnpm exec prettier --check --cache --cache-location docs/prd.md .", "차단"],
+    // 2차: executes()가 못 보는 실행(파일로 쓴 데이터·커밋 메시지를 같은 명령에서 실행)
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh && find /tmp -name x.sh -exec sh {} \\;",
+      "차단",
+      "db push",
+    ],
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh; awk 'BEGIN{system(\"sh /tmp/x.sh\")}'",
+      "차단",
+      "db push",
+    ],
+    [undefined, "echo 'supabase db push' > /tmp/x.sh; timeout 5 sh /tmp/x.sh", "차단", "db push"],
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh; script -qc 'sh /tmp/x.sh' /dev/null",
+      "차단",
+      "db push",
+    ],
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh; git -c alias.z='!sh /tmp/x.sh' z",
+      "차단",
+      "db push",
+    ],
+    [undefined, "git commit -m 'supabase db push' && $(git log -1 --format=%s)", "차단", "db push"],
+    // 2차: 검사 실행 뒤 쓰기(새 규칙이 못 보는 출력 옵션·argv)
+    [
+      "developer",
+      "pnpm check && python3 -c \"import sys; open(sys.orig_argv[-1], 'w')\" docs/prd.md",
+      "차단",
+    ],
+    ["developer", "pnpm check && curl -D docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && curl -c docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && curl --trace docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && curl --stderr docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && wget -a docs/prd.md -O- https://example.com", "차단"],
+    ["developer", "pnpm check && wget --output-file=docs/prd.md -O- https://example.com", "차단"],
+    ["developer", "pnpm check && wget -qO- https://example.com --save-cookies docs/prd.md", "차단"],
+    [
+      "developer",
+      "pnpm check && node -e \"require('fs').writeFileSync(require('path').join('docs', 'prd.md'), 'x')\"",
+      "차단",
+    ],
   ];
 
   it.each(rows)("%s · %s → %s", (role, command, verdict, reason) => {
