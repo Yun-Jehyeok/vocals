@@ -687,50 +687,38 @@ describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
     ["developer", "pnpm --filter @vocals/supabase exec vitest run tests/acceptance", "허용"],
     ["developer", "pnpm -C supabase test -- tests/acceptance/17-example.test.ts", "허용"],
     ["developer", "npx vitest run supabase/tests/acceptance/", "허용"],
-    ["developer", "pnpm test 2>&1 | tail -20; ls supabase/migrations/", "허용"],
-    ["developer", "pnpm check && git diff --stat origin/main -- supabase/migrations/", "허용"],
-    ["developer", "pnpm check:migrations; cat supabase/migrations/20260101000000_init.sql", "허용"],
-    ["developer", "pnpm run check:req-trace && grep -n PAY docs/prd.md", "허용"],
-    ["developer", "pnpm db:reset && ls supabase/migrations/", "허용"],
-    ["developer", 'pnpm db:query "select 1" && cat supabase/tests/helpers/db.ts', "허용"],
-    ["developer", "pnpm typecheck && pnpm lint && cat docs/prd.md", "허용"],
     ["developer", "pnpm exec prettier --check docs/ supabase/tests/acceptance/", "허용"],
-    ["developer", "npx tsc --noEmit -p supabase && ls supabase/tests/acceptance", "허용"],
-    [
-      "developer",
-      "node --experimental-strip-types scripts/acceptance-guard.ts && ls supabase/tests/acceptance",
-      "허용",
-    ],
+    ["developer", "pnpm vitest run supabase/tests/acceptance/ > /tmp/out.txt 2>&1", "허용"],
+    ["developer", "pnpm test 2>&1 | tail -20", "허용"],
     [
       "developer",
       "ls supabase/tests/acceptance | xargs -I{} git log -1 --format=%s -- supabase/tests/acceptance/{}",
       "허용",
     ],
-    ["developer", "ls supabase/tests/acceptance | xargs pnpm vitest run", "허용"],
     ["developer", 'cd "$(git rev-parse --show-toplevel)" && cat docs/prd.md', "허용"],
-    // 2. 데이터 인자·heredoc의 경로 글자(gh api -f, jq, printf, git commit -m, gh --body-file -)
+    // 2. 검사 실행 + 데이터 인자·heredoc의 경로 글자(gh api -f, jq, printf, git commit -m, gh --body-file -)
     [
       "developer",
-      "pnpm format && gh api repos/o/r/pulls/1 -X PATCH -f body='docs/prd.md 확인, supabase/migrations/ 추가'",
+      "pnpm check && gh api repos/o/r/pulls/1 -X PATCH -f body='docs/prd.md 확인, supabase/migrations/ 추가'",
       "허용",
     ],
-    ["developer", 'pnpm format && git commit -m "fix: supabase/migrations/ 이름 확인"', "허용"],
+    ["developer", 'pnpm check && git commit -m "fix: supabase/migrations/ 이름 확인"', "허용"],
     [
       "developer",
-      "pnpm format && gh pr create --draft --body-file - <<'EOF'\n- docs/prd.md 참고\nEOF",
-      "허용",
-    ],
-    [
-      "developer",
-      "pnpm format; gh api x --jq '.[] | select(.filename | startswith(\"supabase/migrations/\"))'",
+      "pnpm check && gh pr create --draft --body-file - <<'EOF'\n- docs/prd.md 참고\nEOF",
       "허용",
     ],
     [
       "developer",
-      "pnpm format && jq -r '.files[] | select(startswith(\"docs/\"))' /tmp/pr.json",
+      "pnpm test; gh api x --jq '.[] | select(.filename | startswith(\"supabase/migrations/\"))'",
       "허용",
     ],
-    ["developer", "pnpm format; printf '%s\\n' 'docs/prd.md'", "허용"],
+    [
+      "developer",
+      "pnpm check && jq -r '.files[] | select(startswith(\"docs/\"))' /tmp/pr.json",
+      "허용",
+    ],
+    ["developer", "pnpm check; printf '%s\\n' 'docs/prd.md'", "허용"],
     // 명령 규칙(push·원격 DB)도 데이터 인자의 글자는 보지 않는다
     [
       undefined,
@@ -790,6 +778,43 @@ describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
 
   // 진짜 쓰기는 그대로 막는다
   const blocked: BashRow[] = [
+    // QA 반려 2차로 줄인 허용 범위: 검사 실행이 다른 세그먼트와 섞이고 그 세그먼트가 보호 경로를 말하면 main처럼 막는다.
+    // (검사 명령 단독 실행과 명백한 데이터 인자만 허용. 읽기는 따로 실행한다)
+    ["developer", "pnpm test 2>&1 | tail -20; ls supabase/migrations/", "차단", OPAQUE],
+    [
+      "developer",
+      "pnpm check && git diff --stat origin/main -- supabase/migrations/",
+      "차단",
+      OPAQUE,
+    ],
+    [
+      "developer",
+      "pnpm check:migrations; cat supabase/migrations/20260101000000_init.sql",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "pnpm run check:req-trace && grep -n PAY docs/prd.md", "차단", OPAQUE],
+    ["developer", "pnpm db:reset && ls supabase/migrations/", "차단", OPAQUE],
+    ["developer", 'pnpm db:query "select 1" && cat supabase/tests/helpers/db.ts', "차단", OPAQUE],
+    ["developer", "pnpm typecheck && pnpm lint && cat docs/prd.md", "차단", OPAQUE],
+    ["developer", "npx tsc --noEmit -p supabase && ls supabase/tests/acceptance", "차단", OPAQUE],
+    [
+      "developer",
+      "node --experimental-strip-types scripts/acceptance-guard.ts && ls supabase/tests/acceptance",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "ls supabase/tests/acceptance | xargs pnpm vitest run", "차단", OPAQUE],
+    // 데이터 빼기는 모든 세그먼트가 허용 목록일 때만: 포맷(파일 쓰기)과 섞이면 빼지 않는다
+    ["developer", "pnpm format && gh api x -f body='docs/prd.md 확인'", "차단", OPAQUE],
+    // 읽기 모드 도구의 모르는 플래그
+    [
+      "developer",
+      "pnpm exec vitest run --config /tmp/v.config.ts supabase/tests/acceptance/",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "pnpm check --no-bail docs/", "차단", OPAQUE],
     // 파일을 쓰는 러너 인자: 스냅샷 갱신, --write, --fix, --update, 포맷
     ["developer", "pnpm vitest run -u supabase/tests/acceptance/", "차단", OPAQUE],
     [

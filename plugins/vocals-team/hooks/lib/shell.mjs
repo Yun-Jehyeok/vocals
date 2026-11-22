@@ -587,12 +587,21 @@ function inlineCodeTargets(code, lang) {
     const value = lang === "pl" ? raw.replace(/^\+?(<|>{1,2})\s*/, "") : raw;
     const top = frames.at(-1);
     const kind = top ? kindOf(top) : "other";
+    // 바로 감싼 자리만 본다. 글 자리 바깥(`print(open(…))`)이어도 안쪽 경로 자리는 경로다(QA 반려 2차)
     if (kind === "text") continue;
-    // 글 자리 안에서 부른 replace 등(`f.write(s.replace('a', 'docs/x'))`)의 결과는 경로가 되지 않는다
-    if (kind === "other" && frames.slice(0, -1).some((frame) => kindOf(frame) === "text")) continue;
     if (pathLike(value, kind === "path")) out.push(value);
   }
   return out;
+}
+
+/**
+ * 쓰기 API가 있는 코드가 경로를 조합하거나 바깥에서 받는가: join·resolve·format, 문자열 더하기, f-string,
+ * 템플릿 `${}`, argv·환경 변수·입력·디렉터리 목록. 그러면 무엇을 쓰는지 모른다(opaque, QA 반려 2차 #48)
+ */
+const COMPOSED_PATH =
+  /\b(join|resolve|normpath|abspath|expanduser|format|environ|getenv|input|readline|stdin|glob|rglob|listdir|readdir|readdirSync|scandir|iterdir|walk)\b|argv|ARGV|\bENV\b|\bf["']|\$\{|["'`]\s*\+|\+\s*["'`]|%\s*\(|["']\s*%\s*\w/;
+function composesPath(code) {
+  return WRITE_API.test(code) && COMPOSED_PATH.test(code);
 }
 
 /** patch 파일이 바꾸는 경로(a/·b/ 접두어를 뗀 상대 경로). 읽지 못하면 null */
@@ -672,7 +681,17 @@ const READ_ONLY_SCRIPT_FILES =
 /** 직접 부를 수 있는 검사 도구. 읽기 모드(readOnlyTool)가 아니면 opaque */
 const DIRECT_TOOLS = new Set(["vitest", "tsc", "eslint", "prettier"]);
 /** pnpm·npm·yarn의 값을 받는 전역 플래그 */
-const PM_VALUE_FLAGS = ["--filter", "-F", "-C", "--dir", "--prefix", "--reporter", "--loglevel"];
+const PM_VALUE_FLAGS = ["--filter", "-F", "-C", "--dir"];
+/** pnpm·npm·yarn의 값 없는 전역 플래그 중 허용하는 것 */
+const PM_SAFE_FLAGS = [
+  "-r",
+  "--recursive",
+  "--silent",
+  "-s",
+  "--if-present",
+  "--parallel",
+  "--stream",
+];
 /** 파일을 쓰지 않는 git 하위 명령(xargs 뒤) */
 const READ_GIT = new Set([
   "log",
@@ -689,35 +708,63 @@ const READ_GIT = new Set([
   "describe",
 ]);
 
-/** 첫 번째 명령 단어의 위치(플래그와 그 값을 건너뜀). 없으면 -1 */
-function commandIndex(args, valueFlags = []) {
+/**
+ * 검사 도구마다 읽기 모드에서 허용하는 플래그(허용 목록, QA 반려 2차 #48). 여기 없는 플래그가 하나라도 있으면
+ * 읽기 모드가 아니다: 트레이스·캐시·커버리지·프로파일·설정 파일·출력 경로 옵션은 파일을 쓰거나 코드를 실행한다.
+ * flags: 값 없는 플래그, values: 값을 받는 플래그(`--x v`, `--x=v`), require: 꼭 있어야 하는 플래그 중 하나
+ */
+const TOOL_FLAGS = {
+  vitest: {
+    flags: ["--run", "--silent", "--passWithNoTests"],
+    values: ["-t", "--testNamePattern", "--reporter", "--project", "--dir", "--bail"],
+    require: [],
+  },
+  tsc: {
+    flags: ["--noEmit", "--pretty", "--skipLibCheck"],
+    values: ["-p", "--project"],
+    require: ["--noEmit"],
+  },
+  eslint: { flags: ["--quiet", "--no-warn-ignored"], values: ["--max-warnings"], require: [] },
+  prettier: {
+    flags: ["--check", "-c", "--list-different", "-l"],
+    values: ["--log-level"],
+    require: ["--check", "-c", "--list-different", "-l"],
+  },
+};
+/** 검사 스크립트를 node로 직접 부를 때 허용하는 node 플래그 */
+const NODE_SAFE_FLAGS = /^(--experimental-strip-types|--no-warnings(=ExperimentalWarning)?)$/;
+
+/**
+ * args가 허용 목록 안의 플래그와 위치 인자만 갖는가. `true`·`false` 위치 인자(`--noEmit false`)는 허용하지 않는다
+ * @param {string[]} args @param {{ flags: string[], values: string[] }} spec
+ */
+function onlyAllowedFlags(args, spec) {
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? "";
-    if (a === "--") return i + 1 < args.length ? i + 1 : -1;
-    if (valueFlags.includes(a)) i++;
-    else if (!a.startsWith("-")) return i;
+    if (/^(true|false)$/i.test(a)) return false;
+    if (!a.startsWith("-") || a === "--") continue;
+    if (spec.flags.includes(a)) continue;
+    if (spec.values.includes(a)) i++;
+    else if (!(a.includes("=") && spec.values.includes(a.slice(0, a.indexOf("="))))) return false;
   }
-  return -1;
+  return true;
 }
 
-/** 검사·테스트 도구를 읽기 모드로 부르는가: vitest(init 제외), tsc --noEmit, eslint, prettier --check */
+/**
+ * 검사·테스트 도구를 읽기 모드로 부르는가(허용 목록): vitest(run·list), tsc --noEmit, eslint, prettier --check,
+ * 검사 스크립트 파일(플래그 없이).
+ */
 function readOnlyTool(tool, args) {
-  if (args.some((a) => WRITE_FLAGS.test(a))) return false;
-  switch (basename(tool)) {
-    case "vitest":
-      return positional(args)[0] !== "init";
-    case "tsc":
-      // `--noEmit false`·`--noEmit=false`·`--build`는 실제로 출력한다(QA 반려 #48)
-      return (
-        args.includes("--noEmit") && !args.some((a) => /^(false|--noEmit=.*|-b|--build)$/i.test(a))
-      );
-    case "eslint":
-      return true;
-    case "prettier":
-      return args.some((a) => ["--check", "-c", "--list-different", "-l"].includes(a));
-    default:
-      return READ_ONLY_SCRIPT_FILES.test(tool);
+  const name = basename(tool);
+  const spec = TOOL_FLAGS[/** @type {keyof typeof TOOL_FLAGS} */ (name)];
+  if (!spec) return READ_ONLY_SCRIPT_FILES.test(tool) && args.every((a) => !a.startsWith("-"));
+  if (name === "vitest" && !["run", "list", undefined].includes(positional(args, spec.values)[0])) {
+    // vitest의 첫 위치 인자는 하위 명령(init·bench 등)이거나 파일 필터다. 필터는 경로 모양만 허용
+    const first = positional(args, spec.values)[0] ?? "";
+    if (!/[/.]/.test(first)) return false;
   }
+  if (spec.require.length > 0 && !args.some((a) => spec.require.includes(a))) return false;
+  return onlyAllowedFlags(args, spec);
 }
 
 /**
@@ -729,28 +776,35 @@ function readOnlyTool(tool, args) {
 function runsReadOnly(name, args) {
   if (args.some((a) => WRITE_FLAGS.test(a))) return false;
   if (name === "npx" || name === "bunx") {
-    if (args.some((a) => a === "-c" || a === "--call")) return false;
-    const i = commandIndex(args, ["-p", "--package"]);
-    return i !== -1 && readOnlyTool(args[i] ?? "", args.slice(i + 1));
+    let i = 0;
+    while (args[i] === "-y" || args[i] === "--yes") i++;
+    return i < args.length && readOnlyTool(args[i] ?? "", args.slice(i + 1));
   }
   if (name === "tsx" || name === "ts-node") {
-    return READ_ONLY_SCRIPT_FILES.test(positional(args)[0] ?? "");
+    return READ_ONLY_SCRIPT_FILES.test(args[0] ?? "") && args.every((a) => !a.startsWith("-"));
   }
   if (name !== "pnpm" && name !== "npm" && name !== "yarn") return false;
-  const i = commandIndex(args, PM_VALUE_FLAGS);
-  if (i === -1) return false;
-  const sub = args[i] ?? "";
-  const rest = args.slice(i + 1);
-  if (["run", "run-script", "exec", "dlx", "x"].includes(sub)) {
-    const j = commandIndex(rest, PM_VALUE_FLAGS);
-    if (j === -1) return false;
-    const next = rest[j] ?? "";
-    return sub.startsWith("run")
-      ? READ_ONLY_SCRIPTS.test(next)
-      : readOnlyTool(next, rest.slice(j + 1));
+  // 전역 플래그도 허용 목록만(QA 반려 2차)
+  let i = 0;
+  for (; i < args.length; i++) {
+    const a = args[i] ?? "";
+    if (!a.startsWith("-")) break;
+    if (PM_VALUE_FLAGS.includes(a)) i++;
+    else if (!PM_SAFE_FLAGS.includes(a) && !/^--filter=/.test(a)) return false;
   }
-  if (["test", "t", "tst"].includes(sub) || READ_ONLY_SCRIPTS.test(sub)) return true;
-  return readOnlyTool(sub, rest); // pnpm vitest run, pnpm tsc --noEmit
+  const sub = args[i] ?? "";
+  let rest = args.slice(i + 1);
+  // 스크립트에 넘기는 인자는 위치 인자만(`pnpm test -- tests/x.test.ts`). 플래그가 있으면 읽기 전용으로 보지 않는다
+  const plain = (/** @type {string[]} */ list) =>
+    list.every((a) => a === "--" || !a.startsWith("-"));
+  if (sub === "run" || sub === "run-script") {
+    const script = rest[0] ?? "";
+    rest = rest.slice(1);
+    return READ_ONLY_SCRIPTS.test(script) && plain(rest);
+  }
+  if (sub === "exec") return readOnlyTool(rest[0] ?? "", rest.slice(1));
+  if (["test", "t", "tst"].includes(sub) || READ_ONLY_SCRIPTS.test(sub)) return plain(rest);
+  return name === "pnpm" && Object.hasOwn(TOOL_FLAGS, sub) && readOnlyTool(sub, rest); // pnpm vitest run
 }
 
 /**
@@ -793,7 +847,9 @@ function unknownStdin(seg, prev) {
  * Bash 명령을 분석한다.
  * @param {string} command
  * @param {string} cwd 명령을 실행하는 디렉터리
- * @returns {{ targets: Target[], commits: CommitCall[], pushes: PushCall[], opaque: string[] }}
+ * @returns {{ targets: Target[], commits: CommitCall[], pushes: PushCall[], opaque: string[], checks: string[] }}
+ *   checks: 읽기 전용으로 본 검사·테스트 실행(pnpm check 등). main에서는 opaque였다. 다른 세그먼트와 섞이면 guard-bash가
+ *   main처럼 보호 경로 언급 검사를 돌린다(QA 반려 2차 #48)
  *   opaque: 무엇을 쓰는지 훅이 풀 수 없는 쓰기(스크립트 실행, xargs, 변수 경로 등)
  */
 export function analyzeCommand(command, cwd, depth = 0) {
@@ -805,6 +861,8 @@ export function analyzeCommand(command, cwd, depth = 0) {
   const pushes = [];
   /** @type {string[]} */
   const opaque = [];
+  /** @type {string[]} */
+  const checks = [];
   let dir = cwd;
   let dirKnown = true;
 
@@ -1037,9 +1095,9 @@ export function analyzeCommand(command, cwd, depth = 0) {
           READ_ONLY.has(next) ||
           (next === "sed" && !nextArgs.some((a) => /^-[a-zA-Z]*i/.test(a))) ||
           (next === "git" && READ_GIT.has(positional(nextArgs, ["-C", "-c"])[0] ?? "")) ||
-          runsReadOnly(next, nextArgs) ||
           next === "";
-        if (!readsOnly) opaque.push(`xargs ${next}`);
+        if (!readsOnly && runsReadOnly(next, nextArgs)) checks.push(`xargs ${next}`);
+        else if (!readsOnly) opaque.push(`xargs ${next}`);
         break;
       }
       case "perl": {
@@ -1055,13 +1113,16 @@ export function analyzeCommand(command, cwd, depth = 0) {
           } else if (!a.startsWith("-")) files.push(a);
         }
         if (inPlace) for (const p of hasCode ? files : files.slice(1)) add(p, "write", "perl -i");
-        else if (hasCode)
-          for (const code of codes)
+        else if (hasCode) {
+          for (const code of codes) {
             for (const p of inlineCodeTargets(code, "pl")) add(p, "write", name);
-        else if (files.length > 0 && files[0] !== "-") opaque.push(`perl ${files[0]}`);
+            if (composesPath(code)) opaque.push(`${name} 코드 경로`);
+          }
+        } else if (files.length > 0 && files[0] !== "-") opaque.push(`perl ${files[0]}`);
         else {
           for (const code of stdinCode(seg, previous, dir)) {
             for (const p of inlineCodeTargets(code, "pl")) add(p, "write", `${name} 표준 입력`);
+            if (composesPath(code)) opaque.push(`${name} 코드 경로`);
           }
         }
         break;
@@ -1080,8 +1141,9 @@ export function analyzeCommand(command, cwd, depth = 0) {
             hasCode = true;
             const code = args[i + 1] ?? "";
             for (const p of inlineCodeTargets(code, lang)) add(p, "write", name);
-            // 코드가 인자(sys.argv, process.argv, ARGV)로 받은 경로에 쓰면 뒤의 인자가 쓰기 대상이다(QA 반려 #48)
-            if (WRITE_API.test(code) && /\bargv\b|\bARGV\b/.test(code)) {
+            if (composesPath(code)) opaque.push(`${name} 코드 경로`);
+            // 코드가 인자(sys.argv, sys.orig_argv, process.argv, ARGV)로 받은 경로에 쓰면 뒤의 인자가 쓰기 대상이다
+            if (WRITE_API.test(code) && /argv|ARGV/.test(code)) {
               for (const p of positional(args.slice(i + 2))) add(p, "write", `${name} 인자`);
             }
             i++;
@@ -1090,15 +1152,21 @@ export function analyzeCommand(command, cwd, depth = 0) {
         const script = positional(args).find((a) => a !== "-");
         if (!hasCode && script) {
           // 검사 스크립트(scripts/check-*.ts 등)는 갱신 플래그가 없으면 파일을 쓰지 않는다
-          if (!READ_ONLY_SCRIPT_FILES.test(script) || args.some((a) => WRITE_FLAGS.test(a))) {
-            opaque.push(`${name} 스크립트`);
-          }
+          const at = args.indexOf(script);
+          const checkScript =
+            name === "node" &&
+            READ_ONLY_SCRIPT_FILES.test(script) &&
+            args.slice(0, at).every((a) => NODE_SAFE_FLAGS.test(a)) &&
+            args.slice(at + 1).every((a) => !a.startsWith("-"));
+          if (checkScript) checks.push(`${name} ${script}`);
+          else opaque.push(`${name} 스크립트`);
         } else if (args.includes("-m")) opaque.push(`${name} -m`);
         else if (!hasCode) {
           // python3 - <<'EOF', node <<'EOF', echo '…' | python3 같은 표준 입력 코드도 -c/-e처럼 본다
           if (unknownStdin(seg, previous)) opaque.push(`${name} 표준 입력`);
           for (const code of stdinCode(seg, previous, dir)) {
             for (const p of inlineCodeTargets(code, lang)) add(p, "write", `${name} 표준 입력`);
+            if (composesPath(code)) opaque.push(`${name} 코드 경로`);
           }
         }
         break;
@@ -1162,6 +1230,7 @@ export function analyzeCommand(command, cwd, depth = 0) {
           commits.push(...inner.commits);
           pushes.push(...inner.pushes);
           opaque.push(...inner.opaque);
+          checks.push(...inner.checks);
         } else if (index === -1 && positional(args).some((a) => a !== "-")) {
           opaque.push(`${name} 스크립트`);
         } else if (index === -1 && depth < 3) {
@@ -1173,6 +1242,8 @@ export function analyzeCommand(command, cwd, depth = 0) {
             commits.push(...inner.commits);
             pushes.push(...inner.pushes);
             opaque.push(...inner.opaque);
+            checks.push(...inner.checks);
+            checks.push(...inner.checks);
           }
         }
         break;
@@ -1184,6 +1255,7 @@ export function analyzeCommand(command, cwd, depth = 0) {
           commits.push(...inner.commits);
           pushes.push(...inner.pushes);
           opaque.push(...inner.opaque);
+          checks.push(...inner.checks);
         }
         break;
       case "git": {
@@ -1299,13 +1371,15 @@ export function analyzeCommand(command, cwd, depth = 0) {
         break;
       }
       default:
-        if (RUNNERS.has(name) && !runsReadOnly(name, args)) opaque.push(name);
+        if (RUNNERS.has(name) && runsReadOnly(name, args)) checks.push(name);
+        else if (RUNNERS.has(name)) opaque.push(name);
+        else if (DIRECT_TOOLS.has(name) && readOnlyTool(name, args)) checks.push(name);
         // 직접 부른 검사 도구가 쓰기 모드면(prettier --write, eslint --fix, tsc 출력, vitest -u) 무엇을 쓰는지 모른다
         else if (DIRECT_TOOLS.has(name) && !readOnlyTool(name, args)) opaque.push(name);
         break;
     }
   }
-  return { targets, commits, pushes, opaque };
+  return { targets, commits, pushes, opaque, checks };
 }
 
 /**
@@ -1369,42 +1443,96 @@ function writesFile(segments) {
   );
 }
 
-/** 셸·인터프리터·스크립트 파일처럼 훅이 내용을 못 보는 것을 실행하는 세그먼트인가 */
-const EXECUTORS = new Set([
-  "sh",
-  "bash",
-  "zsh",
-  "dash",
-  "ksh",
-  "fish",
-  "eval",
-  "source",
-  ".",
-  "xargs",
+/**
+ * 데이터를 빼도 되는 명령(허용 목록, QA 반려 2차 #48). 한 명령의 모든 세그먼트가 여기 들면 데이터 인자·heredoc을 뺀다.
+ * 하나라도 모르는 명령(셸·인터프리터·find·awk·timeout·script·./x·`$(…)` 명령 자리 등)이 있으면 아무것도 빼지 않는다:
+ * 파일에 쓴 글이나 커밋 메시지가 같은 명령에서 실행될 수 있다.
+ */
+const SAFE_COMMANDS = new Set([
+  "echo",
+  "printf",
+  "gh",
+  "jq",
+  "grep",
+  "egrep",
+  "fgrep",
+  "rg",
+  "cat",
+  "head",
+  "tail",
+  "wc",
+  "sort",
+  "uniq",
+  "diff",
+  "ls",
+  "pwd",
+  "true",
+  ":",
+  "test",
+  "base64",
+  "tee",
+  "cd",
+  "pushd",
+  "popd",
 ]);
-const INTERPRETERS = new Set([
-  "python",
-  "python3",
-  "node",
-  "deno",
-  "bun",
-  "perl",
-  "ruby",
-  "tsx",
-  "ts-node",
+/** 데이터를 빼도 되는 git 하위 명령. `-C` 밖의 전역 플래그(`-c alias.…` 등)가 있으면 안 된다 */
+const SAFE_GIT = new Set([
+  "add",
+  "commit",
+  "log",
+  "show",
+  "diff",
+  "status",
+  "rev-parse",
+  "branch",
+  "checkout",
+  "switch",
+  "fetch",
+  "push",
+  "pull",
+  "restore",
+  "ls-files",
+  "ls-tree",
+  "blame",
+  "merge-base",
 ]);
-function executes(/** @type {Segment} */ seg, /** @type {boolean} */ forMention) {
+
+/** 검사·테스트만 돌리는 세그먼트인가(pnpm check, vitest run, node scripts/check-*.ts 등) */
+function isCheckRun(/** @type {Segment} */ seg) {
+  const words = stripPrefix(seg.words);
+  const name = basename(words[0] ?? "");
+  const args = words.slice(1);
+  if (RUNNERS.has(name)) return runsReadOnly(name, args);
+  if (DIRECT_TOOLS.has(name)) return readOnlyTool(name, args);
+  if (name !== "node") return false;
+  const at = args.findIndex((a) => !a.startsWith("-"));
+  return (
+    at !== -1 &&
+    READ_ONLY_SCRIPT_FILES.test(args[at] ?? "") &&
+    args.slice(0, at).every((a) => NODE_SAFE_FLAGS.test(a)) &&
+    args.slice(at + 1).every((a) => !a.startsWith("-"))
+  );
+}
+
+/** 데이터를 빼도 되는 세그먼트인가 */
+function safeSegment(/** @type {Segment} */ seg, /** @type {string} */ command) {
   const words = stripPrefix(seg.words);
   const raw = words[0] ?? "";
-  const name = basename(raw);
-  const args = words.slice(1);
-  if (!raw) return false;
-  if (raw.includes("/") || raw.startsWith("~")) return true; // ./x.sh, /tmp/x.sh
-  if (EXECUTORS.has(name)) return true;
-  if (INTERPRETERS.has(name))
-    return !args.some((a) => /^(-e|--eval|-p|--print|-c|-[a-zA-Z]*[eE])$/.test(a));
-  // 명령 규칙: 검사·테스트가 아닌 러너(`pnpm exec sh x.sh`, `npx …`)도 실행으로 본다
-  return !forMention && RUNNERS.has(name) && !runsReadOnly(name, args);
+  // 변수 대입만 있는 세그먼트도 `X=$(…)`이면 실행한다
+  const spans = seg.wordSpans.slice(0, seg.words.length - words.length);
+  if (spans.some(([start, end]) => hasLiveSubstitution(command.slice(start, end)))) return false;
+  if (!raw) return true;
+  if (raw.includes("/") || raw.includes("$") || raw.includes("`")) return false;
+  if (SAFE_COMMANDS.has(raw)) return true;
+  if (raw === "git") {
+    let i = 1;
+    while ((words[i] ?? "").startsWith("-")) {
+      if (words[i] !== "-C") return false;
+      i += 2;
+    }
+    return SAFE_GIT.has(words[i] ?? "");
+  }
+  return isCheckRun(seg);
 }
 
 /**
@@ -1466,12 +1594,19 @@ function dataArgIndexes(name, words, forMention) {
  */
 export function stripData(command, { forMention = false } = {}) {
   const segments = parseShell(command);
-  // 같은 명령에서 셸·스크립트를 실행하면 데이터(파일에 쓴 글, 커밋 메시지)가 실행될 수 있다:
-  // `echo '…' > x.sh && sh x.sh`, `git commit -m '…' && git log -1 --format=%s | sh`. 아무것도 빼지 않는다(QA 반려 #48)
-  if (segments.some((seg) => executes(seg, forMention))) return command;
+  // 모르는 명령이 하나라도 있으면 아무것도 빼지 않는다(허용 목록, QA 반려 2차 #48)
+  if (!segments.every((seg) => safeSegment(seg, command))) return command;
   /** @type {[number, number][]} */
   const spans = [];
   segments.forEach((seg, index) => {
+    const offset = seg.words.length - stripPrefix(seg.words).length;
+    const words = seg.words.slice(offset);
+    const name = basename(words[0] ?? "");
+    // 보호 경로 언급 검사: 검사·테스트 실행 자신의 인자(`pnpm vitest run supabase/tests/acceptance/…`)는 보지 않는다
+    if (forMention && isCheckRun(seg)) {
+      for (const span of seg.wordSpans.slice(offset + 1)) spans.push(span);
+      return;
+    }
     const pipeline = [];
     for (let j = index + 1; j < segments.length; j++) {
       const next = /** @type {Segment} */ (segments[j]);
@@ -1480,9 +1615,6 @@ export function stripData(command, { forMention = false } = {}) {
     }
     if (pipeline.some((next) => !DATA_STDIN.has(nameOf(next)))) return;
     if (forMention && writesFile([seg, ...pipeline])) return;
-    const offset = seg.words.length - stripPrefix(seg.words).length;
-    const words = seg.words.slice(offset);
-    const name = basename(words[0] ?? "");
     if (DATA_STDIN.has(name)) {
       for (const [start, end, live] of seg.heredocSpans) if (!live) spans.push([start, end]);
     }
