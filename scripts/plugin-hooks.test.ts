@@ -1066,6 +1066,17 @@ describe("guard-bash: #48 새 허용으로 열린 우회 (QA 재현)", () => {
     // 3차: 환경 변수로 스냅샷 갱신(vitest는 UPDATE_SNAPSHOT을 -u처럼 읽는다. 인라인 스냅샷은 테스트 파일을 고친다)
     ["developer", "UPDATE_SNAPSHOT=all pnpm test supabase/tests/acceptance/", "차단"],
     ["developer", "UPDATE_SNAPSHOT=all pnpm exec vitest run supabase/tests/acceptance/", "차단"],
+    // 4차 재판정(ceaa727): SINK_FNS의 dump는 yaml.dump·YAML.dump처럼 스트림 없이 부르면 인자 글을 돌려준다
+    [
+      "developer",
+      "python3 -c \"import yaml; p = yaml.dump('docs/prd.md').splitlines()[0]; open(p, 'w')\"",
+      "차단",
+    ],
+    [
+      "developer",
+      "ruby -e \"require 'yaml'; File.write(YAML.dump('docs/prd.md').lines[0][4..].strip, 'x')\"",
+      "차단",
+    ],
   ];
 
   it.each(rows)("%s · %s → %s", (role, command, verdict, reason) => {
