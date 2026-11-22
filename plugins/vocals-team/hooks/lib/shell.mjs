@@ -476,7 +476,6 @@ const SINK_FNS = new Set([
   "writelines",
   "write_text",
   "write_bytes",
-  "dump",
 ]);
 /**
  * 바꾸는 함수: 찾을 글자(첫 인자)는 결과에 들어가지 않지만 바꿀 글자·대상 글(둘째 인자부터)은 결과(경로일 수 있다)에 들어간다.
