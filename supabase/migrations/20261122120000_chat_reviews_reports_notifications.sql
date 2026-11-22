@@ -293,7 +293,8 @@ $$;
 -- ---------------------------------------------------------------------------
 
 -- 참여 행 (CHAT-02, CHAT-03, CHAT-06, DM-01, DM-03, 팀장 결정 3·4)
---   - 단체 채팅방: 그 방의 트레이너는 admin, 나머지는 member. 들어오는(다시 들어오는) 학생은 그 트레이너의
+--   - 단체 채팅방: 그 방의 트레이너는 admin, 나머지는 학생(role = student)이고 member다. 나간 줄에도 건다.
+--     들어오는(다시 들어오는) 학생은 그 트레이너의
 --     끝나지 않은(waiting_schedule·active) 수강권이 있다. 처음부터 나간 줄(left_at 있음)로 넣는 것과
 --     나가기·알림 끄기에는 수강권 검사를 하지 않는다.
 --   - 1:1 대화: 모두 member, 서로 다른 두 사람까지, 같은 두 사람의 1:1 대화는 하나.
@@ -332,6 +333,12 @@ begin
 
     if new.member_role <> 'member' then
       raise exception '단체 채팅방의 admin은 그 방의 트레이너뿐이다'
+        using errcode = 'check_violation';
+    end if;
+
+    -- 그 방의 트레이너가 아닌 참여자는 학생이다. 나간 줄(left_at 있음)에도 건다(다른 트레이너·운영자 불가).
+    if private.user_role(new.user_id) is distinct from 'student' then
+      raise exception '단체 채팅방의 참여자는 그 방의 트레이너와 학생뿐이다'
         using errcode = 'check_violation';
     end if;
 
