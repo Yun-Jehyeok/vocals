@@ -677,6 +677,419 @@ describe("guard-bash: 명령 규칙과 Bash 파일 쓰기 (이슈 #17)", () => {
   });
 });
 
+describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
+  const OPAQUE = "풀 수 없는 쓰기";
+  // 실제 차단 기록(.claude/logs, #17 댓글, #23·#32·#38·#41)과 같은 종류의 명령. 이제 허용한다
+  const allowed: BashRow[] = [
+    // 1. 테스트·검사 실행 + 보호 경로 문자열(developer.opaque-write, 로그 target tests/acceptance/·supabase/migrations/)
+    ["developer", "pnpm vitest run supabase/tests/acceptance/17-example.test.ts", "허용"],
+    ["developer", "cd supabase && pnpm vitest run tests/acceptance/17-example.test.ts", "허용"],
+    ["developer", "pnpm --filter @vocals/supabase exec vitest run tests/acceptance", "허용"],
+    ["developer", "pnpm -C supabase test -- tests/acceptance/17-example.test.ts", "허용"],
+    ["developer", "npx vitest run supabase/tests/acceptance/", "허용"],
+    ["developer", "pnpm exec prettier --check docs/ supabase/tests/acceptance/", "허용"],
+    ["developer", "pnpm vitest run supabase/tests/acceptance/ > /tmp/out.txt 2>&1", "허용"],
+    ["developer", "pnpm test 2>&1 | tail -20", "허용"],
+    [
+      "developer",
+      "ls supabase/tests/acceptance | xargs -I{} git log -1 --format=%s -- supabase/tests/acceptance/{}",
+      "허용",
+    ],
+    ["developer", 'cd "$(git rev-parse --show-toplevel)" && cat docs/prd.md', "허용"],
+    // 2. 검사 실행 + 데이터 인자·heredoc의 경로 글자(gh api -f, jq, printf, git commit -m, gh --body-file -)
+    [
+      "developer",
+      "pnpm check && gh api repos/o/r/pulls/1 -X PATCH -f body='docs/prd.md 확인, supabase/migrations/ 추가'",
+      "허용",
+    ],
+    ["developer", 'pnpm check && git commit -m "fix: supabase/migrations/ 이름 확인"', "허용"],
+    [
+      "developer",
+      "pnpm check && gh pr create --draft --body-file - <<'EOF'\n- docs/prd.md 참고\nEOF",
+      "허용",
+    ],
+    [
+      "developer",
+      "pnpm test; gh api x --jq '.[] | select(.filename | startswith(\"supabase/migrations/\"))'",
+      "허용",
+    ],
+    [
+      "developer",
+      "pnpm check && jq -r '.files[] | select(startswith(\"docs/\"))' /tmp/pr.json",
+      "허용",
+    ],
+    ["developer", "pnpm check; printf '%s\\n' 'docs/prd.md'", "허용"],
+    ["developer", "pnpm check && gh pr edit 50 --body 'docs/prd.md 링크 고침'", "허용"],
+    // 명령 규칙(push·원격 DB)도 데이터 인자의 글자는 보지 않는다
+    [
+      undefined,
+      "gh api repos/o/r/issues/1/comments -f body='막힌 명령: git push origin main'",
+      "허용",
+    ],
+    [undefined, 'git commit -m "fix: git push origin main 오탐 수정"', "허용"],
+    [undefined, "grep -rn 'supabase db push' plugins/", "허용"],
+    [undefined, "jq -n --arg cmd 'supabase db push --linked' '{cmd: $cmd}'", "허용"],
+    [undefined, "echo 'git push --force origin x 는 막힌다'", "허용"],
+    [undefined, "printf '%s\\n' 'git push origin main' > /tmp/note.md", "허용"],
+    [undefined, "gh api x -f body='`code` 안의 git push origin main'", "허용"],
+    // 3. 인터프리터 코드의 글(PR 본문·문서 내용)에 든 경로(qa.scope #38·#41, planner.scope packages/shared)
+    [
+      "qa",
+      "python3 - <<'EOF'\nbody = open('/tmp/pr.md').read()\nbody = body.replace('vitest run tests/acceptance', 'pnpm vitest run supabase/tests/acceptance')\nopen('/tmp/pr.md', 'w').write(body)\nEOF",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 - <<'EOF'\nbody = '''\n## 확인\n- `20261122090000_client_insert_authorization.sql` 정책\n- 'supabase/seed.sql' 더미 사용자\n'''\nopen('/tmp/body.md', 'w').write(body)\nEOF",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 - <<'EOF'\nimport json\nb = json.load(open('/tmp/pr.json'))['body']\nb = b.replace('supabase/migrations/20261122090000_client_insert_authorization.sql', 'x')\nopen('/tmp/body.md', 'w').write(b)\nEOF",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 -c \"import json; json.dump({'body': 'packages/shared/src/rule.ts 수정 필요'}, open('/tmp/b.json', 'w'))\"",
+      "허용",
+    ],
+    ["qa", "python3 -c \"open('/tmp/n.md', 'w').write('packages/shared/src/rule.ts')\"", "허용"],
+    [
+      "qa",
+      "node -e \"require('fs').writeFileSync('/tmp/b.md', 'packages/shared/src/rule.ts')\"",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 - <<'EOF'\n# don't touch packages/shared/src/rule.ts\nopen('/tmp/x', 'w').write('x')\nEOF",
+      "허용",
+    ],
+    [
+      "planner",
+      // replace의 바꿀 글자가 공백 없는 경로 모양이면 결과가 경로일 수 있어 경로로 본다(QA 반려). 문장은 허용
+      "python3 - <<'EOF'\np = 'docs/erd.md'\ns = open(p).read()\ns = s.replace('packages/shared/ 규칙', 'packages/shared/src/ 순수 함수')\nopen(p, 'w').write(s)\nEOF",
+      "허용",
+    ],
+    // 4. find -exec 읽기 명령(planner.scope packages/shared)
+    ["planner", "find packages/shared -name '*.ts' -exec sed -n '1,5p' {} \\;", "허용"],
+    ["planner", "find packages/shared -type f -exec perl -ne 'print if /PAY/' {} +", "허용"],
+    ["planner", "find packages/shared -name '*.ts' -exec cp {} /tmp/ \\;", "허용"],
+    ["developer", "find docs -name '*.md' -exec grep -l PAY {} +", "허용"],
+  ];
+
+  // 진짜 쓰기는 그대로 막는다
+  const blocked: BashRow[] = [
+    // QA 반려 2차로 줄인 허용 범위: 검사 실행이 다른 세그먼트와 섞이고 그 세그먼트가 보호 경로를 말하면 main처럼 막는다.
+    // (검사 명령 단독 실행과 명백한 데이터 인자만 허용. 읽기는 따로 실행한다)
+    ["developer", "pnpm test 2>&1 | tail -20; ls supabase/migrations/", "차단", OPAQUE],
+    [
+      "developer",
+      "pnpm check && git diff --stat origin/main -- supabase/migrations/",
+      "차단",
+      OPAQUE,
+    ],
+    [
+      "developer",
+      "pnpm check:migrations; cat supabase/migrations/20260101000000_init.sql",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "pnpm run check:req-trace && grep -n PAY docs/prd.md", "차단", OPAQUE],
+    ["developer", "pnpm db:reset && ls supabase/migrations/", "차단", OPAQUE],
+    ["developer", 'pnpm db:query "select 1" && cat supabase/tests/helpers/db.ts', "차단", OPAQUE],
+    ["developer", "pnpm typecheck && pnpm lint && cat docs/prd.md", "차단", OPAQUE],
+    ["developer", "npx tsc --noEmit -p supabase && ls supabase/tests/acceptance", "차단", OPAQUE],
+    [
+      "developer",
+      "node --experimental-strip-types scripts/acceptance-guard.ts && ls supabase/tests/acceptance",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "ls supabase/tests/acceptance | xargs pnpm vitest run", "차단", OPAQUE],
+    // 데이터 빼기는 모든 세그먼트가 허용 목록일 때만: 포맷(파일 쓰기)과 섞이면 빼지 않는다
+    ["developer", "pnpm format && gh api x -f body='docs/prd.md 확인'", "차단", OPAQUE],
+    // 읽기 모드 도구의 모르는 플래그
+    [
+      "developer",
+      "pnpm exec vitest run --config /tmp/v.config.ts supabase/tests/acceptance/",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "pnpm check --no-bail docs/", "차단", OPAQUE],
+    // QA 반려 3차 뒤: env 접두어, gh 목록 밖 하위 명령
+    ["developer", "env UPDATE_SNAPSHOT=all pnpm test supabase/tests/acceptance/", "차단", OPAQUE],
+    ["developer", "pnpm check && gh extension exec x docs/prd.md", "차단", OPAQUE],
+    // 파일을 쓰는 러너 인자: 스냅샷 갱신, --write, --fix, --update, 포맷
+    ["developer", "pnpm vitest run -u supabase/tests/acceptance/", "차단", OPAQUE],
+    [
+      "developer",
+      "pnpm test -- --update supabase/tests/acceptance/17-example.test.ts",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "npx prettier --write docs/prd.md", "차단", OPAQUE],
+    ["developer", "pnpm exec eslint --fix supabase/tests/acceptance/", "차단", OPAQUE],
+    ["developer", "pnpm format && cat docs/prd.md", "차단", OPAQUE],
+    ["developer", "npx -c 'vitest run' docs/", "차단", OPAQUE],
+    ["developer", "node scripts/check-req-trace.ts --update docs/", "차단", OPAQUE],
+    ["developer", "pnpm vitest init docs/", "차단", OPAQUE],
+    // 모르는 곳으로 cd한 뒤의 쓰기
+    ["developer", 'cd "$(git rev-parse --show-toplevel)" && echo x > docs/prd.md', "차단", OPAQUE],
+    ["developer", "cd $X && git -C docs rm prd.md", "차단", OPAQUE],
+    // 파일로 쓴 데이터(나중에 실행될 수 있다)와 파이프로 쓰기 명령에 넘기는 데이터
+    ["developer", "printf 'rm -rf docs\\n' > /tmp/x.sh && bash /tmp/x.sh", "차단", OPAQUE],
+    ["developer", "cat > /tmp/x.sh <<'EOF'\nrm -rf docs\nEOF\nbash /tmp/x.sh", "차단", OPAQUE],
+    ["developer", "echo docs/prd.md | xargs rm", "차단", OPAQUE],
+    [
+      "developer",
+      "gh api x --jq '.[].filename' > /tmp/l && xargs rm < /tmp/l; ls docs",
+      "차단",
+      OPAQUE,
+    ],
+    // 명령 규칙: 실행되는 데이터
+    [undefined, "echo 'git push origin main' | sh", "차단", "main에 직접 push"],
+    [undefined, 'echo "$(git push origin main)"', "차단", "main에 직접 push"],
+    [undefined, 'gh api x -f body="$(supabase db push)"', "차단", "db push"],
+    [undefined, "gh api x -f body=`supabase db push`", "차단", "db push"],
+    [undefined, 'git commit -m "x" && git push origin main', "차단", "main에 직접 push"],
+    [undefined, 'git commit -m "$(git push origin main)"', "차단", "main에 직접 push"],
+    [undefined, "grep -l x docs/*.md | xargs -I{} sh -c 'supabase db push'", "차단", "db push"],
+    // 인터프리터 코드의 진짜 쓰기(변수·목록·경로 인자, 공백 있는 경로)
+    [
+      "qa",
+      "python3 - <<'EOF'\np = 'packages/shared/src/rule.ts'\nopen(p, 'w').write('x')\nEOF",
+      "차단",
+      QA_ONLY,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nfor f in ['docs/a.md', 'docs/b.md']:\n    open(f, 'w').write('x')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    ["developer", "python3 -c \"open('docs/my notes.md', 'w').write('x')\"", "차단", DOCS],
+    ["developer", "node -e \"require('fs').writeFileSync('docs/a b.md', 'x')\"", "차단", DOCS],
+    [
+      "developer",
+      "python3 - <<'EOF'\nimport shutil\nshutil.copy('/tmp/x', 'docs/prd.md')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nimport os\nos.replace('/tmp/x', 'docs/prd.md')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nbody = open('docs/prd.md').read().replace('a', 'b')\nopen('docs/prd.md', 'w').write(body)\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nfrom pathlib import Path\nPath('docs/prd.md').write_text('packages/shared')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    ["developer", 'perl -e \'open(my $f, ">", "docs/prd.md")\'', "차단", DOCS],
+    ["developer", "perl -e 'open(F, \">docs/prd.md\")'", "차단", DOCS],
+    ["developer", "ruby -e \"File.write('docs/prd.md', 'packages')\"", "차단", DOCS],
+    [
+      "developer",
+      "node -e \"const p = 'docs/prd.md'; require('fs').appendFileSync(p, 'x')\"",
+      "차단",
+      DOCS,
+    ],
+    // find의 진짜 쓰기
+    ["developer", "find docs -name '*.md' -exec sed -i 's/a/b/' {} +", "차단", DOCS],
+    ["developer", "find /tmp/src -name '*.md' -exec cp {} docs/ \\;", "차단", DOCS],
+    ["developer", "find docs -exec mv {} /tmp/ \\;", "차단", DOCS],
+    ["developer", "find docs -name '*.md' -exec cp /tmp/x {} \\;", "차단", DOCS],
+    ["developer", "find /tmp -name x -fprint docs/list.txt", "차단", DOCS],
+    ["developer", "find docs -name '*.md' -exec sh -c 'echo x > \"$1\"' _ {} \\;", "차단", OPAQUE],
+    ["planner", "find packages/shared -name '*.ts' -exec sed -i 's/a/b/' {} +", "차단", PLANNER],
+    // QA 반려 뒤 더한 것: 직접 부른 도구·다운로드·셸 표준 입력
+    ["developer", "pnpm check && tsc --outDir docs", "차단", OPAQUE],
+    ["developer", "pnpm exec tsc --noEmit=false --outDir docs", "차단", OPAQUE],
+    ["developer", "curl -O https://example.com/prd.md && ls docs", "차단", OPAQUE],
+    ["developer", "cd docs && wget https://example.com/prd.md", "차단", OPAQUE],
+    ["qa", "curl -sSo packages/shared/src/rule.ts https://example.com", "차단", QA_ONLY],
+    ["qa", "wget -P packages/shared https://example.com/x.ts", "차단", QA_ONLY],
+    ["developer", "git log -1 --format=%B | sh; ls docs", "차단", OPAQUE],
+    ["developer", "awk 'BEGIN{system(\"rm docs/prd.md\")}'", "차단", OPAQUE],
+    [
+      "qa",
+      "node -e \"require('fs').writeFileSync(process.argv[1], 'x')\" packages/shared/src/rule.ts",
+      "차단",
+      QA_ONLY,
+    ],
+    ["developer", "bash -c 'echo x > docs/a.md; echo $HOME'", "차단", DOCS],
+    [
+      "developer",
+      "python3 -c \"import sys; f = open('/tmp/o', 'w'); f.write('docs/x'.replace('x', 'y'))\"",
+      "허용",
+    ],
+    ["developer", "awk '{print $1}' docs/prd.md", "허용"],
+    ["developer", "curl -s https://example.com | jq . > /tmp/x.json; cat docs/prd.md", "허용"],
+    ["developer", "wget -qO- https://example.com | head; ls docs", "허용"],
+    [undefined, "echo 'git push origin main 오탐' > /tmp/note.md", "허용"],
+  ];
+
+  it.each([...allowed, ...blocked])("%s · %s → %s", (role, command, verdict, reason) => {
+    const result = runHook("guard-bash.mjs", {
+      tool_name: "Bash",
+      cwd: repo,
+      ...roleInput(role),
+      tool_input: { command },
+    });
+    expectVerdict(result, verdict, reason);
+  });
+});
+
+// QA 독립 검증(이슈 #48): main 훅은 막았는데 #48의 새 허용(readOnlyTool, TEXT_FNS, 데이터 인자 제거,
+// 검사 실행의 opaque 제외)으로 열린 진짜 쓰기·실행. 모두 main 훅에서 차단되던 명령이다.
+describe("guard-bash: #48 새 허용으로 열린 우회 (QA 재현)", () => {
+  const rows: BashRow[] = [
+    // readOnlyTool: `--noEmit false`는 tsc가 실제로 출력 파일을 쓴다
+    ["developer", "pnpm exec tsc --noEmit false --outDir docs", "차단"],
+    ["developer", "npx tsc --noEmit --noEmit false --outDir docs", "차단"],
+    // TEXT_FNS: replace·sub의 바꿀 글자가 그대로 쓰기 경로가 된다
+    ["developer", "python3 -c \"open('x'.replace('x', 'docs/prd.md'), 'w')\"", "차단"],
+    [
+      "developer",
+      "python3 -c \"import re; p = re.sub('x', 'docs/prd.md', 'x'); open(p, 'w')\"",
+      "차단",
+    ],
+    [
+      "developer",
+      "node -e \"require('fs').writeFileSync('a'.replace('a', 'docs/prd.md'), 'x')\"",
+      "차단",
+    ],
+    // 데이터 인자 제거: 파일로 쓴 데이터·커밋 메시지를 같은 명령에서 실행한다
+    [undefined, "echo 'supabase db push' > /tmp/x.sh && sh /tmp/x.sh", "차단", "db push"],
+    [undefined, "printf 'git push --force origin main' > /tmp/x.sh; bash /tmp/x.sh", "차단"],
+    [undefined, "echo 'supabase db push' | tee /tmp/x.sh && sh /tmp/x.sh", "차단", "db push"],
+    [
+      undefined,
+      "git commit -m 'supabase db push' && git log -1 --format=%s | sh",
+      "차단",
+      "db push",
+    ],
+    // 검사 실행이 opaque에서 빠지면서, 뒤에 붙은 쓰기를 잡던 보호 경로 언급 검사가 꺼진다
+    ["developer", "pnpm check && prettier --write docs/prd.md", "차단"],
+    ["developer", "pnpm check && awk 'BEGIN{print 1 > \"docs/prd.md\"}'", "차단"],
+    ["developer", "pnpm check && curl -o docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && wget -O docs/prd.md https://example.com", "차단"],
+    [
+      "developer",
+      "pnpm test && python3 -c \"import sys; open(sys.argv[1], 'w')\" docs/prd.md",
+      "차단",
+    ],
+    ["developer", 'pnpm check && bash -c "$X" docs/prd.md', "차단"],
+    // 2차 재판정(bae3a23): 글 자리(print·log·write) 안에서 부른 쓰기 호출
+    ["developer", "python3 -c \"print(open('x'.replace('x', 'docs/prd.md'), 'w'))\"", "차단"],
+    [
+      "developer",
+      "node -e \"console.log(require('fs').writeFileSync('a'.replace('a', 'docs/prd.md'), 'x'))\"",
+      "차단",
+    ],
+    // 2차: 읽기 모드 도구의 쓰기 옵션(트레이스·캐시·커버리지 파일을 실제로 쓴다)
+    ["developer", "pnpm exec tsc --noEmit --generateTrace docs", "차단"],
+    ["developer", "pnpm exec tsc --noEmit --incremental --tsBuildInfoFile docs/prd.md", "차단"],
+    ["developer", "pnpm exec tsc --noEmit --generateCpuProfile docs/prd.md", "차단"],
+    ["developer", "pnpm exec vitest run --coverage --coverage.reportsDirectory docs", "차단"],
+    ["developer", "pnpm exec eslint --cache --cache-location docs/prd.md .", "차단"],
+    ["developer", "pnpm exec prettier --check --cache --cache-location docs/prd.md .", "차단"],
+    // 2차: executes()가 못 보는 실행(파일로 쓴 데이터·커밋 메시지를 같은 명령에서 실행)
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh && find /tmp -name x.sh -exec sh {} \\;",
+      "차단",
+      "db push",
+    ],
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh; awk 'BEGIN{system(\"sh /tmp/x.sh\")}'",
+      "차단",
+      "db push",
+    ],
+    [undefined, "echo 'supabase db push' > /tmp/x.sh; timeout 5 sh /tmp/x.sh", "차단", "db push"],
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh; script -qc 'sh /tmp/x.sh' /dev/null",
+      "차단",
+      "db push",
+    ],
+    [
+      undefined,
+      "echo 'supabase db push' > /tmp/x.sh; git -c alias.z='!sh /tmp/x.sh' z",
+      "차단",
+      "db push",
+    ],
+    [undefined, "git commit -m 'supabase db push' && $(git log -1 --format=%s)", "차단", "db push"],
+    // 2차: 검사 실행 뒤 쓰기(새 규칙이 못 보는 출력 옵션·argv)
+    [
+      "developer",
+      "pnpm check && python3 -c \"import sys; open(sys.orig_argv[-1], 'w')\" docs/prd.md",
+      "차단",
+    ],
+    ["developer", "pnpm check && curl -D docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && curl -c docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && curl --trace docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && curl --stderr docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && wget -a docs/prd.md -O- https://example.com", "차단"],
+    ["developer", "pnpm check && wget --output-file=docs/prd.md -O- https://example.com", "차단"],
+    ["developer", "pnpm check && wget -qO- https://example.com --save-cookies docs/prd.md", "차단"],
+    [
+      "developer",
+      "pnpm check && node -e \"require('fs').writeFileSync(require('path').join('docs', 'prd.md'), 'x')\"",
+      "차단",
+    ],
+    // 3차 재판정(03d63ca): gh 인자를 데이터로 빼면서 gh가 파일을 쓰는 하위 명령의 경로도 빠진다
+    ["developer", "pnpm check && gh run download 1 -D docs", "차단"],
+    ["developer", "pnpm check && gh release download v1 -D docs -p x", "차단"],
+    ["developer", "pnpm check && gh repo clone o/r docs/x", "차단"],
+    // 3차: gh가 SAFE_COMMANDS라 gh alias(셸 실행)의 인자도 데이터로 빠진다
+    [undefined, "gh alias set --shell z 'supabase db push' && gh z", "차단", "db push"],
+    [undefined, "gh alias set z '!supabase db push' && gh z", "차단", "db push"],
+    // 3차: 바로 감싼 자리가 글을 그대로 돌려주는 함수(str.strip·split·encode·removesuffix)
+    ["developer", "python3 -c \"p = str.strip('docs/prd.md'); open(p, 'w')\"", "차단"],
+    ["developer", "python3 -c \"p = str.split('docs/prd.md')[0]; open(p, 'w')\"", "차단"],
+    ["developer", "python3 -c \"p = str.encode('docs/prd.md'); open(p, 'w')\"", "차단"],
+    [
+      "qa",
+      "python3 -c \"p = str.removesuffix('packages/shared/src/rule.ts', 'z'); open(p, 'w')\"",
+      "차단",
+    ],
+    // 3차: 환경 변수로 스냅샷 갱신(vitest는 UPDATE_SNAPSHOT을 -u처럼 읽는다. 인라인 스냅샷은 테스트 파일을 고친다)
+    ["developer", "UPDATE_SNAPSHOT=all pnpm test supabase/tests/acceptance/", "차단"],
+    ["developer", "UPDATE_SNAPSHOT=all pnpm exec vitest run supabase/tests/acceptance/", "차단"],
+    // 4차 재판정(ceaa727): SINK_FNS의 dump는 yaml.dump·YAML.dump처럼 스트림 없이 부르면 인자 글을 돌려준다
+    [
+      "developer",
+      "python3 -c \"import yaml; p = yaml.dump('docs/prd.md').splitlines()[0]; open(p, 'w')\"",
+      "차단",
+    ],
+    [
+      "developer",
+      "ruby -e \"require 'yaml'; File.write(YAML.dump('docs/prd.md').lines[0][4..].strip, 'x')\"",
+      "차단",
+    ],
+  ];
+
+  it.each(rows)("%s · %s → %s", (role, command, verdict, reason) => {
+    const result = runHook("guard-bash.mjs", {
+      tool_name: "Bash",
+      cwd: repo,
+      ...roleInput(role),
+      tool_input: { command },
+    });
+    expectVerdict(result, verdict, reason);
+  });
+});
+
 describe("guard-mcp: 위험한 Supabase MCP 도구 (이슈 #17)", () => {
   const dangerous = [
     "create_project",

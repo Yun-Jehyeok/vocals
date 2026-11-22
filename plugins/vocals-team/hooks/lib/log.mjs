@@ -1,14 +1,17 @@
 // 차단 이벤트 로그. 이슈 #17 하네스 6단계(측정).
 //
-// 훅이 막을 때마다 `<저장소 루트>/.claude/logs/<YYYY-MM-DD>-<세션 앞 8자>.jsonl`에 한 줄을 더한다.
-// 클라우드는 세션이 끝나면 파일이 사라지므로 팀장이 작업 PR에 같이 커밋한다(PM 결정, docs/decisions.md 2026-11-20).
+// 훅이 막을 때마다 `<메인 체크아웃>/.claude/logs/<YYYY-MM-DD>-<세션 앞 8자>-<브랜치>.jsonl`에 한 줄을 더한다.
+// 메인 체크아웃: 세션 프로젝트(CLAUDE_PROJECT_DIR)의 git common dir 기준. 수동 worktree·/tmp 복사본에서 막혀도 여기 남는다.
+// 브랜치: 막힌 체크아웃의 브랜치. 브랜치마다 파일이 달라 여러 PR이 같은 파일을 고치지 않는다(이슈 #48).
+// 클라우드는 세션이 끝나면 파일이 사라지므로 팀장이 그 브랜치의 작업 PR에 커밋한다(PM 결정, docs/decisions.md 2026-11-20).
 // 집계는 `pnpm harness:report`(scripts/harness-report.ts).
 //
 // - 남기는 것: ts, session, event, rule, role, tool, target(저장소 기준 경로나 MCP 도구 이름).
 // - 남기지 않는 것: 명령 원문, 파일 내용, 도구 인자 값(시크릿·개인정보가 들어갈 수 있다).
 // - 쓰기 실패는 조용히 무시한다. 차단 판정에 영향을 주지 않는다.
+import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { findRepoRoot, realPath, roleOf } from "./rules.mjs";
 
 /**
@@ -40,11 +43,43 @@ export const RULE_IDS = {
 const PLUGIN_MARKER = join("plugins", "vocals-team", ".claude-plugin", "plugin.json");
 export const LOG_DIR = join(".claude", "logs");
 
+function git(cwd, args) {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000,
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
 /** path가 속한 vocals 저장소 루트(수동 worktree면 그 worktree). 아니면 null */
 function vocalsRoot(path) {
   if (!path) return null;
   const root = findRepoRoot(realPath(resolve(String(path))));
   return root && existsSync(join(root, PLUGIN_MARKER)) ? root : null;
+}
+
+/** worktree의 메인 체크아웃(git common dir의 부모). 알 수 없으면 root 그대로 */
+export function mainCheckout(root) {
+  const common = git(root, ["rev-parse", "--git-common-dir"]);
+  if (!common) return root;
+  const dir = resolve(root, common);
+  return basename(dir) === ".git" && existsSync(dirname(dir)) ? dirname(dir) : root;
+}
+
+/** 파일 이름에 쓸 브랜치 이름. `fix/48-x` → `fix-48-x`, 브랜치가 없으면(detached) `detached` */
+export function branchSlug(branch) {
+  const name = String(branch ?? "").trim();
+  if (!name || name === "HEAD") return "detached";
+  const slug = name
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 80);
+  return slug || "detached";
 }
 
 /** 파일 이름에 쓸 세션 앞 8자. `session_` 접두어와 영숫자가 아닌 글자는 뺀다 */
@@ -67,14 +102,26 @@ function shownTarget(target, root) {
 }
 
 /**
+ * `<날짜>-<세션 앞 8자>-<브랜치>.jsonl`. 브랜치마다 파일이 달라서 같은 세션의 여러 PR이 같은 파일을 고치지 않는다(이슈 #48).
+ * @param {string} dir @param {string} ts @param {string} session @param {string} branch
+ */
+export function logFileName(dir, ts, session, branch) {
+  return join(dir, `${ts.slice(0, 10)}-${session}-${branch}.jsonl`);
+}
+
+/**
  * 차단 이벤트 한 줄을 쓴다. 실패하면 아무것도 하지 않는다.
  * @param {{ input: any, rule: string | undefined, target?: string | null, root?: string | null }} event
  */
 export function logBlock({ input, rule, target, root }) {
   try {
-    const repo =
-      vocalsRoot(root) ?? vocalsRoot(input?.cwd) ?? vocalsRoot(process.env.CLAUDE_PROJECT_DIR);
+    const project = vocalsRoot(process.env.CLAUDE_PROJECT_DIR);
+    // 막힌 곳: 대상 파일·명령의 저장소(수동 worktree나 /tmp 복사본일 수 있다). 브랜치 이름과 target 기준
+    const repo = vocalsRoot(root) ?? vocalsRoot(input?.cwd) ?? project;
     if (!repo) return;
+    // 쓰는 곳: 세션 프로젝트(없으면 막힌 저장소)의 메인 체크아웃. worktree를 지워도 기록이 남는다(이슈 #48)
+    const logRepo = mainCheckout(project ?? repo);
+    const branch = branchSlug(git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]));
     const ts = new Date().toISOString();
     const session = shortSession(input?.session_id);
     const line = {
@@ -86,9 +133,9 @@ export function logBlock({ input, rule, target, root }) {
       tool: String(input?.tool_name ?? ""),
       target: shownTarget(target, repo),
     };
-    const dir = join(repo, LOG_DIR);
+    const dir = join(logRepo, LOG_DIR);
     mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, `${ts.slice(0, 10)}-${session}.jsonl`), `${JSON.stringify(line)}\n`);
+    appendFileSync(logFileName(dir, ts, session, branch), `${JSON.stringify(line)}\n`);
   } catch {
     // 로그는 측정용이다. 실패해도 차단은 그대로 한다
   }

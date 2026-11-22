@@ -5,13 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { block, readInput, run } from "./lib/io.mjs";
 import { findRepoRoot, mentionsProtected, PathRules, roleOf } from "./lib/rules.mjs";
-import {
-  analyzeCommand,
-  commitSources,
-  pushInfo,
-  stripDataHeredocs,
-  TRAILER_LINE,
-} from "./lib/shell.mjs";
+import { analyzeCommand, commitSources, pushInfo, stripData, TRAILER_LINE } from "./lib/shell.mjs";
 
 const REMOTE_DB = {
   why: "원격 Supabase 프로젝트의 스키마·데이터·설정을 바로 바꾸고 되돌리기 어렵습니다. 스키마는 마이그레이션 파일과 PR로만 바꿉니다(CLAUDE.md).",
@@ -148,14 +142,14 @@ run(() => {
   const role = roleOf(input.agent_type);
   const cwd = String(input.cwd ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
 
-  // `cat > 파일 <<'EOF'`, `git commit -F - <<'EOF'`의 본문(데이터)에 든 "git push origin main" 같은 글자는
-  // 명령이 아니므로 뺀다. 인터프리터·셸 표준 입력의 heredoc은 남긴다.
-  const ruleText = stripDataHeredocs(command);
+  // `cat > 파일 <<'EOF'`, `git commit -F - <<'EOF'`의 본문, `gh api -f body=…`·`git commit -m`·echo·jq의 인자(데이터)에
+  // 든 "git push origin main" 같은 글자는 명령이 아니므로 뺀다. 인터프리터·셸 표준 입력과 명령 치환은 남긴다(이슈 #48).
+  const ruleText = stripData(command);
   for (const rule of COMMAND_RULES) {
     if (rule.test.test(ruleText)) block({ ...rule, target: command, root: cwd });
   }
 
-  const { targets, commits, pushes, opaque } = analyzeCommand(command, cwd);
+  const { targets, commits, pushes, opaque, checks } = analyzeCommand(command, cwd);
 
   for (const push of pushes) {
     const info = pushInfo(push.args);
@@ -175,16 +169,20 @@ run(() => {
     if (violation) block({ ...violation, target: `${violation.file} (${target.via})` });
   }
 
-  if (role === "developer" && opaque.length > 0) {
+  // 검사·테스트 실행(checks)은 main에서 opaque였다. 다른 세그먼트와 섞이면 main처럼 언급 검사를 돌린다(QA 반려 2차 #48).
+  // 검사 실행 자신의 인자는 stripData가 빼므로, 검사 명령만 단독으로 돌리면 허용된다.
+  const unknown = [...opaque, ...checks];
+  if (role === "developer" && unknown.length > 0) {
     const root = findRepoRoot(cwd);
     const protectedPaths = root ? rules.repo(root).protectedPaths : [];
-    const mentioned = mentionsProtected(command, protectedPaths);
+    // PR 본문·커밋 메시지 같은 데이터에 든 경로 글자는 빼고 본다. 파일로 쓰는 데이터는 남긴다(이슈 #48)
+    const mentioned = mentionsProtected(stripData(command, { forMention: true }), protectedPaths);
     if (mentioned) {
       block({
         rule: "developer.opaque-write",
         logTarget: mentioned,
         root: cwd,
-        summary: `훅이 풀 수 없는 쓰기(${opaque.slice(0, 3).join(", ")})와 보호 경로(${mentioned})가 한 명령에 있습니다.`,
+        summary: `훅이 풀 수 없는 쓰기(${unknown.slice(0, 3).join(", ")})와 보호 경로(${mentioned})가 한 명령에 있습니다.`,
         target: command,
         why: "이 명령이 어떤 파일을 쓰는지 훅이 알 수 없어, 개발 역할에서는 docs/·인수 테스트·마이그레이션을 건드릴 수 있으면 막습니다.",
         instead:

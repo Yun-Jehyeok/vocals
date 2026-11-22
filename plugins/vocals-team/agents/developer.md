@@ -23,7 +23,7 @@ memory: project
 - 새 작업: `git -C <메인 체크아웃> fetch origin main && git -C <메인 체크아웃> worktree add /tmp/wt-<이슈번호> -b <브랜치> origin/main`. 이슈 브랜치에서 이어 할 때는 `git fetch origin <브랜치>` 뒤 `worktree add /tmp/wt-<이슈번호> -B <브랜치> origin/<브랜치>`(그 브랜치가 다른 곳에 checkout돼 있으면 실패한다).
 - 그다음부터는 worktree 안에서만 일한다. Bash의 작업 디렉터리는 호출마다 초기화되므로 명령마다 `cd /tmp/wt-<이슈번호> && …`로 쓰고, 파일 경로도 `/tmp/wt-<이슈번호>/…` 절대 경로로 쓴다. 메인 체크아웃의 파일을 고치거나 거기서 브랜치를 바꾸지 않는다(다른 에이전트가 쓰고 있다).
 - 처음에 `pnpm install --frozen-lockfile`(새 worktree에는 node_modules가 없다).
-- 끝나면 `.claude/logs/`의 차단 로그까지 모두 commit·push한 뒤 `git -C <메인 체크아웃> worktree remove /tmp/wt-<이슈번호>`.
+- 끝나면 commit·push한 뒤 `git -C <메인 체크아웃> worktree remove /tmp/wt-<이슈번호>`. 훅 차단 로그는 worktree가 아니라 메인 체크아웃의 `.claude/logs/<날짜>-<세션>-<브랜치>.jsonl`에 쌓이고 팀장이 그 브랜치의 PR에 커밋한다(플러그인 README "차단 로그"). 메인 체크아웃의 로그 파일은 고치거나 지우지 않는다.
 
 ## 하는 일
 
@@ -52,7 +52,10 @@ memory: project
 
 ## 메모리
 
-프로젝트 메모리(`.claude/agent-memory/`)에는 반복되는 함정만 짧게 쌓고, 작업 PR에 같이 커밋한다(클라우드는 세션이 끝나면 파일이 사라진다). 개인정보·시크릿은 적지 않는다.
+프로젝트 메모리(`.claude/agent-memory/`)에는 반복되는 함정만 짧게 쌓는다. 개인정보·시크릿은 적지 않는다.
+
+- `.claude/` 아래 파일(에이전트 메모리·차단 로그)은 Edit·Write 도구로 고치지 않는다(승인이 필요해 세션이 멈춘다). 메모리에 넣을 줄은 [보고]의 `메모리` 칸에 적고 팀장이 넣어 작업 PR에 커밋한다.
+- 승인이 필요한 도구 호출은 기다리지 말고, 무엇을 하려 했는지 [보고]에 적고 멈춘다.
 
 ## 끝낼 때
 

@@ -1,1 +1,4 @@
 {"ts":"2026-11-22T01:15:00.432Z","session":"673715e8","event":"block","rule":"qa.scope","role":"qa","tool":"Bash","target":"vitest run tests/acceptance"}
+{"ts":"2026-11-22T05:10:30.708Z","session":"673715e8","event":"block","rule":"supabase.db-push","role":"qa","tool":"Bash","target":null}
+{"ts":"2026-11-22T06:50:41.645Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"docs/"}
+{"ts":"2026-11-22T07:05:10.598Z","session":"673715e8","event":"block","rule":"developer.docs","role":"developer","tool":"Bash","target":"docs/x"}
