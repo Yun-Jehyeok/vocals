@@ -37,6 +37,7 @@
 | 정산 | `settlements`, `settlement_items` |
 | 채팅방 (단체·1:1) | `chat_rooms`, `chat_members`, `messages` |
 | 후기 / 후기 답글 | `reviews` / `review_replies` |
+| 사용자 이용 제한 | `user_restrictions` |
 | 신고 / 차단 | `reports` / `blocks` |
 | 푸시 기기 토큰 / 알림 | `push_tokens` / `notifications` |
 
@@ -463,6 +464,7 @@ erDiagram
     reviews ||--o| review_replies : "답글 1개"
     users ||--o{ blocks : ""
     users ||--o{ reports : "신고자"
+    users ||--o{ user_restrictions : "이용 제한 이력"
 
     chat_rooms {
         uuid id PK
@@ -513,6 +515,14 @@ erDiagram
         enum status "open, resolved"
         uuid handled_by FK "운영자"
     }
+    user_restrictions {
+        uuid id PK
+        uuid user_id FK "제한된 사용자"
+        text reason "제한 사유"
+        uuid restricted_by FK "제한한 운영자"
+        timestamp lifted_at "해제 시각"
+        uuid lifted_by FK "해제한 운영자"
+    }
 ```
 
 - 단체 채팅방은 트레이너당 하나(`type = group`), 1:1 대화는 두 사람당 하나(`type = direct`)다. (CHAT-01, DM-01)
@@ -555,6 +565,17 @@ erDiagram
   - `review_replies`: 후기마다 하나이고, `body`는 비어 있지 않다. 쓴 사람 컬럼이 없어(답글은 그 후기의 트레이너 것) DB는 쓴 사람을 검사하지 않는다. 그 후기의 트레이너만 쓰는지는 답글 쓰기 서버 함수가 지킨다(10장).
   - `blocks`: (차단한 사람, 차단당한 사람)은 하나이고 자기 자신은 차단하지 않는다.
   - `reports`: 대상은 신고한 사람이 볼 수 있는 메시지·후기·사용자이고, 자기 자신과 자기 글은 신고하지 않는다. 같은 사람이 같은 대상에 처리 대기(`open`) 신고를 둘 내지 않는다. `reason`은 비어 있지 않다. `resolved`이면 `handled_by`(운영자)가 있다. 볼 수 없는 대상과 없는 대상의 신고는 같은 오류로 막는다(#38).
+- 사용자 이용 제한 `user_restrictions` (ADM-04, PM 결정 2026-11-22, #45)
+  - 제한된 사용자는 메시지(단체 채팅방·1:1 대화)를 보내지 못하고, 1:1 대화를 열지 못하고, 후기를 쓰지 못한다. 수업·숙제·결제·로그인, 이미 들어간 방 읽기, 차단·신고·나가기·알림 끄기, 트레이너의 내보내기·가리기는 그대로다. 이미 보낸 메시지·쓴 후기는 그대로 둔다(가리기는 따로 한다).
+  - 대상은 학생·트레이너(`users.role`이 `student`·`trainer`)이고 운영자는 대상이 아니다. 트레이너 정지(`trainer_profiles.approval_status = suspended`, ADM-02)와 별개이며 서로 바꾸지 않는다.
+  - 한 줄이 제한 한 번이다. 제한한 시각은 `created_at`이다. 운영자가 풀면 그 줄의 `lifted_at`·`lifted_by`를 채우고 줄은 지우지 않는다(해제 이력). 다시 제한하면 새 줄을 만든다. 풀리지 않은 줄(`lifted_at`이 빈 줄)이 있으면 제한 중이다. 기간(만료 시각)은 없다.
+  - 쓰기: 운영자가 직접 쓴다(운영자 화면 A-03). 제한하기(새 줄, `restricted_by`는 자기 자신)와 풀기(비어 있는 `lifted_at`·`lifted_by`를 한 번 채움, `lifted_by`는 자기 자신)뿐이다. `user_id`·`reason`·`restricted_by`는 고치지 않고, 해제를 되돌리거나 줄을 지우지 않는다. 탈퇴하지 않은 운영자만 한다(AUTH-07). (#45 결정 필요)
+  - 열람: 운영자는 모두 본다. 다른 사용자(그 사용자의 트레이너·학생 포함)는 보지 않는다. 본인이 자기 줄을 보는지는 #45 결정 필요다.
+  - DB 제약(서버 쓰기에도 걸린다)
+    - `reason`은 비어 있지 않다. `restricted_by`·`lifted_by`는 운영자다. `lifted_at`과 `lifted_by`는 함께 있거나 함께 없다.
+    - 사용자마다 풀리지 않은 줄은 하나다.
+    - 제한 중인 사용자가 보내는 메시지(`messages.sender_id`)와 쓰는 후기(`reviews.student_id`)는 insert가 실패한다.
+    - 1:1 대화 열기는 서버 함수가 판정한다(채팅방·참여 행은 서버가 두 사람 몫을 함께 만들어 DB는 누가 여는지 모른다, 10장).
 
 ## 8. 알림
 
@@ -624,3 +645,8 @@ erDiagram
 - 답글 쓰기 서버 함수가 요청한 사람이 그 후기의 트레이너(`reviews.trainer_id`)인지 확인한다(REV-06). `review_replies`에 쓴 사람 컬럼이 없어 DB 제약으로 검사할 수 없다.
 - 후기 수(MKT-03, MKT-04)에 가린 후기를 세는지.
 - 알림 `type` 값 목록과 `payload` 형식(NOTI-02).
+
+### 7장 사용자 이용 제한 — 서버 함수 이슈에서 정할 것 (#45에서 넘김)
+
+- 1:1 대화 열기 서버 함수가 여는 사람이 제한 중인지 확인한다(ADM-04). 메시지·후기 insert는 DB가 막지만, 1:1 대화를 누가 여는지는 DB가 모른다.
+- 메시지 보내기·후기 쓰기 서버 함수가 제한 중이면 어떤 오류·안내를 돌려주는지.
