@@ -280,6 +280,16 @@ const KEYWORDS = new Set([
 ]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
+/**
+ * 명령 앞에 변수 대입이나 env가 붙었는가(`UPDATE_SNAPSHOT=all pnpm test`, `env X=1 vitest`).
+ * 환경 변수는 도구의 동작(스냅샷 갱신, 설정 파일)을 바꿀 수 있어 검사 실행으로 보지 않는다(QA 반려 3차 #48)
+ * @param {Segment} seg
+ */
+function hasEnvPrefix(seg) {
+  const lead = seg.words.slice(0, seg.words.length - stripPrefix(seg.words).length);
+  return lead.some((w) => ASSIGNMENT.test(w) || w === "env");
+}
+
 /** 앞의 변수 대입, sudo·env 같은 감싸는 명령, 제어 키워드를 벗긴다. */
 function stripPrefix(words) {
   let i = 0;
@@ -433,9 +443,9 @@ const PATH_FIRST_FNS = new Set([
   "createWriteStream",
 ]);
 /**
- * 인자가 결과로 이어지지 않는 함수(글이 경로가 될 수 없는 자리): 출력·로그, 비교·검색 결과가 참·거짓·위치,
- * 파일에 써 넣는 내용(write), 잘라 낼 글자. PR 본문·문서 내용을 고치는 코드의 글을 경로로 읽지 않으려고(#38, #41).
- * replace·sub처럼 인자가 결과에 들어가는 함수는 넣지 않는다(REPLACE_FNS, QA 반려 #48).
+ * 결과가 None·참거짓·숫자라 인자가 경로가 될 수 없는 함수(허용 목록): 출력·로그, 비교·검색(참·거짓·위치),
+ * 파일에 써 넣는 내용(write). PR 본문·문서 내용을 고치는 코드의 글을 경로로 읽지 않으려고(#38, #41).
+ * strip·split·encode·removesuffix·replace처럼 인자나 그 일부를 돌려주는 함수는 넣지 않는다(QA 반려 3차 #48).
  */
 const SINK_FNS = new Set([
   "print",
@@ -458,13 +468,6 @@ const SINK_FNS = new Set([
   "index",
   "rindex",
   "count",
-  "split",
-  "rsplit",
-  "strip",
-  "lstrip",
-  "rstrip",
-  "removeprefix",
-  "removesuffix",
   "includes",
   "test",
   "indexOf",
@@ -474,8 +477,6 @@ const SINK_FNS = new Set([
   "write_text",
   "write_bytes",
   "dump",
-  "encode",
-  "decode",
 ]);
 /**
  * 바꾸는 함수: 찾을 글자(첫 인자)는 결과에 들어가지 않지만 바꿀 글자·대상 글(둘째 인자부터)은 결과(경로일 수 있다)에 들어간다.
@@ -1096,8 +1097,9 @@ export function analyzeCommand(command, cwd, depth = 0) {
           (next === "sed" && !nextArgs.some((a) => /^-[a-zA-Z]*i/.test(a))) ||
           (next === "git" && READ_GIT.has(positional(nextArgs, ["-C", "-c"])[0] ?? "")) ||
           next === "";
-        if (!readsOnly && runsReadOnly(next, nextArgs)) checks.push(`xargs ${next}`);
-        else if (!readsOnly) opaque.push(`xargs ${next}`);
+        if (!readsOnly && !hasEnvPrefix(seg) && runsReadOnly(next, nextArgs)) {
+          checks.push(`xargs ${next}`);
+        } else if (!readsOnly) opaque.push(`xargs ${next}`);
         break;
       }
       case "perl": {
@@ -1158,7 +1160,7 @@ export function analyzeCommand(command, cwd, depth = 0) {
             READ_ONLY_SCRIPT_FILES.test(script) &&
             args.slice(0, at).every((a) => NODE_SAFE_FLAGS.test(a)) &&
             args.slice(at + 1).every((a) => !a.startsWith("-"));
-          if (checkScript) checks.push(`${name} ${script}`);
+          if (checkScript && !hasEnvPrefix(seg)) checks.push(`${name} ${script}`);
           else opaque.push(`${name} 스크립트`);
         } else if (args.includes("-m")) opaque.push(`${name} -m`);
         else if (!hasCode) {
@@ -1242,7 +1244,6 @@ export function analyzeCommand(command, cwd, depth = 0) {
             commits.push(...inner.commits);
             pushes.push(...inner.pushes);
             opaque.push(...inner.opaque);
-            checks.push(...inner.checks);
             checks.push(...inner.checks);
           }
         }
@@ -1371,9 +1372,12 @@ export function analyzeCommand(command, cwd, depth = 0) {
         break;
       }
       default:
-        if (RUNNERS.has(name) && runsReadOnly(name, args)) checks.push(name);
+        // 변수 대입·env가 앞에 붙으면(`UPDATE_SNAPSHOT=all pnpm test`) 검사 실행으로 보지 않는다(QA 반려 3차)
+        if (RUNNERS.has(name) && !hasEnvPrefix(seg) && runsReadOnly(name, args)) checks.push(name);
         else if (RUNNERS.has(name)) opaque.push(name);
-        else if (DIRECT_TOOLS.has(name) && readOnlyTool(name, args)) checks.push(name);
+        else if (DIRECT_TOOLS.has(name) && !hasEnvPrefix(seg) && readOnlyTool(name, args)) {
+          checks.push(name);
+        } else if (DIRECT_TOOLS.has(name) && hasEnvPrefix(seg)) opaque.push(name);
         // 직접 부른 검사 도구가 쓰기 모드면(prettier --write, eslint --fix, tsc 출력, vitest -u) 무엇을 쓰는지 모른다
         else if (DIRECT_TOOLS.has(name) && !readOnlyTool(name, args)) opaque.push(name);
         break;
@@ -1451,7 +1455,6 @@ function writesFile(segments) {
 const SAFE_COMMANDS = new Set([
   "echo",
   "printf",
-  "gh",
   "jq",
   "grep",
   "egrep",
@@ -1497,8 +1500,44 @@ const SAFE_GIT = new Set([
   "merge-base",
 ]);
 
+/**
+ * 데이터를 빼도 되는 gh 하위 명령(허용 목록, QA 반려 3차 #48): `gh api`와 PR·이슈·실행의 조회·작성.
+ * download·clone·alias·extension·codespace 등 파일을 쓰거나 셸을 실행하는 하위 명령은 목록 밖이다.
+ */
+const SAFE_GH = {
+  api: null,
+  pr: [
+    "view",
+    "list",
+    "create",
+    "edit",
+    "comment",
+    "diff",
+    "checks",
+    "status",
+    "ready",
+    "close",
+    "reopen",
+    "review",
+  ],
+  issue: ["view", "list", "create", "edit", "comment", "status", "close", "reopen"],
+  run: ["view", "list", "watch"],
+  repo: ["view"],
+  label: ["list"],
+  search: null,
+};
+function safeGh(/** @type {string[]} */ args) {
+  const valueFlags = ["-R", "--repo"];
+  const pos = positional(args, valueFlags);
+  const sub = pos[0] ?? "";
+  if (!Object.hasOwn(SAFE_GH, sub)) return false;
+  const allowed = SAFE_GH[/** @type {keyof typeof SAFE_GH} */ (sub)];
+  return allowed === null || allowed.includes(pos[1] ?? "");
+}
+
 /** 검사·테스트만 돌리는 세그먼트인가(pnpm check, vitest run, node scripts/check-*.ts 등) */
 function isCheckRun(/** @type {Segment} */ seg) {
+  if (hasEnvPrefix(seg)) return false;
   const words = stripPrefix(seg.words);
   const name = basename(words[0] ?? "");
   const args = words.slice(1);
@@ -1532,6 +1571,7 @@ function safeSegment(/** @type {Segment} */ seg, /** @type {string} */ command) 
     }
     return SAFE_GIT.has(words[i] ?? "");
   }
+  if (raw === "gh") return safeGh(words.slice(1));
   return isCheckRun(seg);
 }
 

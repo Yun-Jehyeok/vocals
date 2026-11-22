@@ -719,6 +719,7 @@ describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
       "허용",
     ],
     ["developer", "pnpm check; printf '%s\\n' 'docs/prd.md'", "허용"],
+    ["developer", "pnpm check && gh pr edit 50 --body 'docs/prd.md 링크 고침'", "허용"],
     // 명령 규칙(push·원격 DB)도 데이터 인자의 글자는 보지 않는다
     [
       undefined,
@@ -815,6 +816,9 @@ describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
       OPAQUE,
     ],
     ["developer", "pnpm check --no-bail docs/", "차단", OPAQUE],
+    // QA 반려 3차 뒤: env 접두어, gh 목록 밖 하위 명령
+    ["developer", "env UPDATE_SNAPSHOT=all pnpm test supabase/tests/acceptance/", "차단", OPAQUE],
+    ["developer", "pnpm check && gh extension exec x docs/prd.md", "차단", OPAQUE],
     // 파일을 쓰는 러너 인자: 스냅샷 갱신, --write, --fix, --update, 포맷
     ["developer", "pnpm vitest run -u supabase/tests/acceptance/", "차단", OPAQUE],
     [
