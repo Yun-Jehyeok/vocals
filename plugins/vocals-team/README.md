@@ -91,4 +91,6 @@ Bash 해석(`lib/shell.mjs`):
 
 `developer`·`qa`는 `memory: project`로 `.claude/agent-memory/<에이전트>/`에 메모리를 둔다. 작업 PR에 같이 커밋하고, `check-harness-change`는 이 디렉터리를 하네스로 보지 않는다(PR diff로 리뷰). 반복되는 함정만 짧게, 개인정보·시크릿 금지.
 
+`.claude/` 아래 파일을 Edit·Write 도구로 고치면 Claude Code가 승인을 요구해, 서브에이전트가 기다리다 세션과 함께 멈춘다(#34·#38·#48). 그래서 에이전트는 메모리에 넣을 줄을 [보고]의 `메모리` 칸에 적고, 팀장이 Bash로 `MEMORY.md`에 덧붙여 커밋한다. 모든 에이전트는 승인이 필요한 도구 호출을 기다리지 않고 [보고]하고 멈춘다.
+
 인수 테스트는 QA만 바꾼다(`Acceptance: qa` 트레일러, CI의 acceptance-guard).
