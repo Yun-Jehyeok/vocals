@@ -86,7 +86,7 @@ describe("카탈로그 검사 (tech-stack 3.11, CLAUDE.md 보안)", () => {
     ).toEqual([]);
   });
 
-  it("authenticated의 테이블 단위 쓰기 권한은 trainer_genres·group_classes·trainer_profile_videos DELETE뿐이다 (나머지는 컬럼 단위)", async () => {
+  it("authenticated의 테이블 단위 쓰기 권한은 trainer_genres·group_classes·trainer_profile_videos·reviews DELETE뿐이다 (나머지는 컬럼 단위)", async () => {
     const { rows } = await db.query<{ table_name: string; privilege_type: string }>(
       `select table_name, privilege_type from information_schema.role_table_grants
        where table_schema = 'public' and grantee = 'authenticated' and privilege_type <> 'SELECT'
@@ -95,6 +95,8 @@ describe("카탈로그 검사 (tech-stack 3.11, CLAUDE.md 보안)", () => {
     // group_classes: 배정된 수강권이 없는 반은 트레이너가 지운다(#28 팀장 결정 8, erd 4장)
     expect(rows).toEqual([
       { table_name: "group_classes", privilege_type: "DELETE" },
+      // reviews: 작성자가 자기 후기를 지운다(#41, REV-04). 답글은 함께 지워진다.
+      { table_name: "reviews", privilege_type: "DELETE" },
       { table_name: "trainer_genres", privilege_type: "DELETE" },
       // trainer_profile_videos: 트레이너가 프로필에서 영상을 뺀다(#35, TRN-07, T-03)
       { table_name: "trainer_profile_videos", privilege_type: "DELETE" },
