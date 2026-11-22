@@ -128,6 +128,24 @@ describe("#41 chat_members 값 검사 — CHAT-02, CHAT-03, CHAT-06, DM-01, DM-0
       "reject",
     ],
     ["CHAT-06: 운영자를 방1에 member로", memberInsert(ROOM.R1, U.ADMIN, "member"), "reject"],
+    // 판정 때 추가: "다른 트레이너·운영자는 단체 채팅방 참여 행이 될 수 없다"는 나간 줄에도 걸린다.
+    // 허용 짝: 준비 데이터가 학생C를 처음부터 나간 줄(ticket_ended)로 넣는다(createBundle6Db가 성공해야 이 파일이 돈다).
+    [
+      "CHAT-06: T2(다른 트레이너)를 방1에 나간 줄로",
+      sql(
+        `insert into public.chat_members (room_id, user_id, member_role, left_at, left_reason)
+         values ('${ROOM.R1}', '${U.T2}', 'member', now(), 'self')`,
+      ),
+      "reject",
+    ],
+    [
+      "CHAT-06: 운영자를 방1에 나간 줄로",
+      sql(
+        `insert into public.chat_members (room_id, user_id, member_role, left_at, left_reason)
+         values ('${ROOM.R1}', '${U.ADMIN}', 'member', now(), 'kicked')`,
+      ),
+      "reject",
+    ],
     [
       "CHAT-06: 학생G를 방1에 admin으로 (참여 행을 지운 뒤)",
       memberInsert(ROOM.R1, U.SG, "admin", removeSGFromR1),
