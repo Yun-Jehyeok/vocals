@@ -2,3 +2,5 @@
 {"ts":"2026-11-22T05:10:30.708Z","session":"673715e8","event":"block","rule":"supabase.db-push","role":"qa","tool":"Bash","target":null}
 {"ts":"2026-11-22T06:50:41.645Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"docs/"}
 {"ts":"2026-11-22T07:05:10.598Z","session":"673715e8","event":"block","rule":"developer.docs","role":"developer","tool":"Bash","target":"docs/x"}
+{"ts":"2026-11-22T07:49:04.578Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"docs/"}
+{"ts":"2026-11-22T07:55:52.006Z","session":"673715e8","event":"block","rule":"commit.message-source","role":"developer","tool":"Bash","target":null}
