@@ -1043,6 +1043,25 @@ describe("guard-bash: #48 새 허용으로 열린 우회 (QA 재현)", () => {
       "pnpm check && node -e \"require('fs').writeFileSync(require('path').join('docs', 'prd.md'), 'x')\"",
       "차단",
     ],
+    // 3차 재판정(03d63ca): gh 인자를 데이터로 빼면서 gh가 파일을 쓰는 하위 명령의 경로도 빠진다
+    ["developer", "pnpm check && gh run download 1 -D docs", "차단"],
+    ["developer", "pnpm check && gh release download v1 -D docs -p x", "차단"],
+    ["developer", "pnpm check && gh repo clone o/r docs/x", "차단"],
+    // 3차: gh가 SAFE_COMMANDS라 gh alias(셸 실행)의 인자도 데이터로 빠진다
+    [undefined, "gh alias set --shell z 'supabase db push' && gh z", "차단", "db push"],
+    [undefined, "gh alias set z '!supabase db push' && gh z", "차단", "db push"],
+    // 3차: 바로 감싼 자리가 글을 그대로 돌려주는 함수(str.strip·split·encode·removesuffix)
+    ["developer", "python3 -c \"p = str.strip('docs/prd.md'); open(p, 'w')\"", "차단"],
+    ["developer", "python3 -c \"p = str.split('docs/prd.md')[0]; open(p, 'w')\"", "차단"],
+    ["developer", "python3 -c \"p = str.encode('docs/prd.md'); open(p, 'w')\"", "차단"],
+    [
+      "qa",
+      "python3 -c \"p = str.removesuffix('packages/shared/src/rule.ts', 'z'); open(p, 'w')\"",
+      "차단",
+    ],
+    // 3차: 환경 변수로 스냅샷 갱신(vitest는 UPDATE_SNAPSHOT을 -u처럼 읽는다. 인라인 스냅샷은 테스트 파일을 고친다)
+    ["developer", "UPDATE_SNAPSHOT=all pnpm test supabase/tests/acceptance/", "차단"],
+    ["developer", "UPDATE_SNAPSHOT=all pnpm exec vitest run supabase/tests/acceptance/", "차단"],
   ];
 
   it.each(rows)("%s · %s → %s", (role, command, verdict, reason) => {
