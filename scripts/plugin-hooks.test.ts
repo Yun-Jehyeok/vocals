@@ -893,6 +893,59 @@ describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
   });
 });
 
+// QA 독립 검증(이슈 #48): main 훅은 막았는데 #48의 새 허용(readOnlyTool, TEXT_FNS, 데이터 인자 제거,
+// 검사 실행의 opaque 제외)으로 열린 진짜 쓰기·실행. 모두 main 훅에서 차단되던 명령이다.
+describe("guard-bash: #48 새 허용으로 열린 우회 (QA 재현)", () => {
+  const rows: BashRow[] = [
+    // readOnlyTool: `--noEmit false`는 tsc가 실제로 출력 파일을 쓴다
+    ["developer", "pnpm exec tsc --noEmit false --outDir docs", "차단"],
+    ["developer", "npx tsc --noEmit --noEmit false --outDir docs", "차단"],
+    // TEXT_FNS: replace·sub의 바꿀 글자가 그대로 쓰기 경로가 된다
+    ["developer", "python3 -c \"open('x'.replace('x', 'docs/prd.md'), 'w')\"", "차단"],
+    [
+      "developer",
+      "python3 -c \"import re; p = re.sub('x', 'docs/prd.md', 'x'); open(p, 'w')\"",
+      "차단",
+    ],
+    [
+      "developer",
+      "node -e \"require('fs').writeFileSync('a'.replace('a', 'docs/prd.md'), 'x')\"",
+      "차단",
+    ],
+    // 데이터 인자 제거: 파일로 쓴 데이터·커밋 메시지를 같은 명령에서 실행한다
+    [undefined, "echo 'supabase db push' > /tmp/x.sh && sh /tmp/x.sh", "차단", "db push"],
+    [undefined, "printf 'git push --force origin main' > /tmp/x.sh; bash /tmp/x.sh", "차단"],
+    [undefined, "echo 'supabase db push' | tee /tmp/x.sh && sh /tmp/x.sh", "차단", "db push"],
+    [
+      undefined,
+      "git commit -m 'supabase db push' && git log -1 --format=%s | sh",
+      "차단",
+      "db push",
+    ],
+    // 검사 실행이 opaque에서 빠지면서, 뒤에 붙은 쓰기를 잡던 보호 경로 언급 검사가 꺼진다
+    ["developer", "pnpm check && prettier --write docs/prd.md", "차단"],
+    ["developer", "pnpm check && awk 'BEGIN{print 1 > \"docs/prd.md\"}'", "차단"],
+    ["developer", "pnpm check && curl -o docs/prd.md https://example.com", "차단"],
+    ["developer", "pnpm check && wget -O docs/prd.md https://example.com", "차단"],
+    [
+      "developer",
+      "pnpm test && python3 -c \"import sys; open(sys.argv[1], 'w')\" docs/prd.md",
+      "차단",
+    ],
+    ["developer", 'pnpm check && bash -c "$X" docs/prd.md', "차단"],
+  ];
+
+  it.each(rows)("%s · %s → %s", (role, command, verdict, reason) => {
+    const result = runHook("guard-bash.mjs", {
+      tool_name: "Bash",
+      cwd: repo,
+      ...roleInput(role),
+      tool_input: { command },
+    });
+    expectVerdict(result, verdict, reason);
+  });
+});
+
 describe("guard-mcp: 위험한 Supabase MCP 도구 (이슈 #17)", () => {
   const dangerous = [
     "create_project",
