@@ -26,3 +26,4 @@
 - fixture SQL은 `supabase/tests/scratch/`의 임시 테스트에서 앞 묶음 DB에 임시 DDL을 `db.exec`로 넣고 FIXTURE_SQL(export)과 준비 작업을 돌려 미리 검증할 수 있다(마이그레이션 파일을 쓰지 않아 훅에 안 막힌다). 돌린 뒤 scratch는 지운다(#41).
 - beforeAll(fixture)이 실패하면 vitest는 그 파일 테스트를 failed가 아니라 skipped로 센다. 개발 전 결과는 "failed + skipped / 전체"로 적는다(#41).
 - 쓴 사람 컬럼이 없는 테이블(review_replies)의 "그 사람이 아니면 서버 insert도 실패" 조건은 service_role에 auth.uid()가 없어 DB가 판정할 수 없다. 테스트로 쓰지 않고 기획에 묻는다(#41).
+- 기존 테이블 쓰기를 새 상태(이용 제한 등)로 막는 조건은 허용 짝을 "같은 시도 + 그 상태만 푼 setup"(liftG)으로 둔다. 다른 사람으로 짝을 두면 거부 원인이 제한인지 가리지 못한다(#45).

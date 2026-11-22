@@ -287,6 +287,16 @@ const ERD_COLUMNS: Record<string, string[]> = {
   ],
   push_tokens: ["id", "user_id", "token", "platform", "created_at"],
   notifications: ["id", "user_id", "type", "payload", "read_at", "created_at"],
+  // 이슈 #45: erd 7장 사용자 이용 제한 (created_at = 제한 시각)
+  user_restrictions: [
+    "id",
+    "user_id",
+    "reason",
+    "restricted_by",
+    "lifted_at",
+    "lifted_by",
+    "created_at",
+  ],
 };
 
 describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
@@ -370,6 +380,12 @@ describe("공통 (tech-stack 3.11, CLAUDE.md 보안·이름)", () => {
       "reviews_before_write",
       "reviews_set_updated_at",
       "reports_before_write",
+      // 이슈 #45: 제한 중 판정은 트리거만 부른다
+      "is_restricted_user",
+      "user_restrictions_before_write",
+      "messages_check_restriction",
+      "reviews_check_restriction",
+      "review_replies_check_restriction",
     ]) {
       expect(byName[fn]?.authenticated, fn).toBe(false);
     }
