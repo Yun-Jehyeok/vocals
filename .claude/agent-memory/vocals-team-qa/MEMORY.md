@@ -31,3 +31,4 @@
 - 훅 허용을 넓히는 PR은 "읽기 도구"로 본 명령의 경로 값 옵션(--cache-location, --generateTrace, --tsBuildInfoFile, coverage.reportsDirectory 등)과 쓰기 API를 감싼 print/log까지 우회 시도한다. 보호 경로가 든 /tmp 복사본은 rm -rf가 훅에 막히므로 새 디렉터리 이름으로 복사한다(#48).
 - 허용 목록 훅을 판정할 때는 목록 안 명령의 위험한 하위 명령(gh alias·download·clone), 인자를 그대로 돌려주는 함수(str.strip·split·encode), 도구가 읽는 환경 변수(vitest UPDATE_SNAPSHOT)를 먼저 우회 시도한다(#48 3차).
 - 글 자리(SINK) 허용 목록을 판정할 때는 함수 이름마다 "스트림·대상 없이 부르면 인자를 돌려주는가"를 확인한다(yaml.dump는 글을 돌려주고 json.dump는 None). 마지막 판정에서는 main에서도 허용되던 구멍(gh api PUT contents 등)을 반려 사유와 분리해 참고로만 적는다(#48 4차).
+- 훅 PR 최종 판정은 마지막 수정 diff가 말한 범위(줄 수)와 같은지 `git show --stat`으로 먼저 확인하고, 우회 탐색은 그 diff 범위만 한다(#48 최종).
