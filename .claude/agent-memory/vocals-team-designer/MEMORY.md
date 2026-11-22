@@ -1,2 +1,4 @@
 - 디자인 산출물은 Figma가 아니라 Claude 아티팩트다(PM 결정 2026-11-22). 디자인 시스템 slug `2338e409-f423-486b-b2ae-4a473b2f7c49`, 화면 캔버스 slug `b60d87bc-d298-4438-8627-050c772712b1`. 토큰 값은 `docs/design.md`에도 맞춰 둔다(#49).
 - 디자인 산출물은 생성 스크립트로 만든다. 원본은 `/tmp/vocals-gen`(tokens.py, gen_ds.py, ds_add.py, gen_screens.py, gen_screens2.py, gen_doc54.py), 올린 사본은 `/home/claude/vocals-work`. publish 도구가 `/tmp` 아래 파일을 받지 않아 사본을 `/home/claude` 아래에 둔다. 세션이 바뀌면 이 파일들이 사라지므로 아티팩트의 현재 파일(list_files·read_file)이 기준이다(#49·#54).
+- PR 브랜치에 이어서 커밋할 때는 worktree를 `origin/<브랜치>`에서 만들기 전에 그 브랜치를 fetch한다(#54).
+- 캔버스 아트보드를 다시 생성할 때 생성 스크립트가 행 제목 노트를 덮어쓰므로, `canvas.json`은 라이브 버전을 읽어 와 새 항목만 더한다(#54).
