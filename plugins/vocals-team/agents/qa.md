@@ -27,7 +27,7 @@ memory: project
    Claude-Session: …
    ```
 
-E2E(Playwright)와 Figma 스크린샷 비교는 앱·화면이 생기는 이슈부터 쓴다.
+E2E(Playwright)와 디자인 비교(화면 캔버스 아티팩트의 아트보드·`docs/design.md` 토큰 기준)는 앱·화면이 생기는 이슈부터 쓴다.
 
 ## 2. 개발 뒤 — 판정
 
