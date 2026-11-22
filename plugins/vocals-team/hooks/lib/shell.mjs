@@ -433,15 +433,11 @@ const PATH_FIRST_FNS = new Set([
   "createWriteStream",
 ]);
 /**
- * 인자가 경로가 아니라 글인 함수: 바꿀 글자(replace·sub), 출력·로그, 비교·검색, 파일에 써 넣는 내용(write).
- * PR 본문·문서 내용을 고치는 코드의 "docs/…", "vitest run tests/acceptance" 같은 글을 경로로 읽지 않으려고(#38, #41).
+ * 인자가 결과로 이어지지 않는 함수(글이 경로가 될 수 없는 자리): 출력·로그, 비교·검색 결과가 참·거짓·위치,
+ * 파일에 써 넣는 내용(write), 잘라 낼 글자. PR 본문·문서 내용을 고치는 코드의 글을 경로로 읽지 않으려고(#38, #41).
+ * replace·sub처럼 인자가 결과에 들어가는 함수는 넣지 않는다(REPLACE_FNS, QA 반려 #48).
  */
-const TEXT_FNS = new Set([
-  "replace",
-  "replaceAll",
-  "sub",
-  "subn",
-  "gsub",
+const SINK_FNS = new Set([
   "print",
   "println",
   "printf",
@@ -464,24 +460,13 @@ const TEXT_FNS = new Set([
   "count",
   "split",
   "rsplit",
-  "partition",
-  "rpartition",
   "strip",
   "lstrip",
   "rstrip",
   "removeprefix",
   "removesuffix",
-  "format",
   "includes",
-  "match",
-  "matchAll",
-  "fullmatch",
-  "findall",
-  "finditer",
-  "search",
   "test",
-  "compile",
-  "escape",
   "indexOf",
   "lastIndexOf",
   "write",
@@ -489,10 +474,15 @@ const TEXT_FNS = new Set([
   "write_text",
   "write_bytes",
   "dump",
-  "dumps",
   "encode",
   "decode",
 ]);
+/**
+ * 바꾸는 함수: 찾을 글자(첫 인자)는 결과에 들어가지 않지만 바꿀 글자·대상 글(둘째 인자부터)은 결과(경로일 수 있다)에 들어간다.
+ * `open('x'.replace('x', 'docs/a.md'), 'w')`, `re.sub('x', 'docs/a.md', 'x')`(QA 반려 #48). 둘째 인자부터는
+ * 공백 없는 경로 모양이면 경로로 본다. 다만 출력·write 같은 글 자리 안에서 부른 것이면 보지 않는다.
+ */
+const REPLACE_FNS = new Set(["replace", "replaceAll", "sub", "subn", "gsub"]);
 
 /** 경로로 볼 수 있는 문자열. loose면(경로 인자 자리) 공백을 허용한다 */
 function pathLike(value, loose) {
@@ -519,7 +509,7 @@ function stringLiterals(code, lang) {
   const quotes = lang === "js" ? "'\"`" : "'\"";
   /** @type {{ callee: string, arg: number }[]} */
   const stack = [];
-  /** @type {{ value: string, callee: string, arg: number }[]} */
+  /** @type {{ value: string, frames: { callee: string, arg: number }[] }[]} */
   const out = [];
   let i = 0;
   while (i < code.length) {
@@ -551,8 +541,7 @@ function stringLiterals(code, lang) {
           j++;
         }
       }
-      const top = stack.at(-1);
-      out.push({ value, callee: top?.callee ?? "", arg: top?.arg ?? 0 });
+      out.push({ value, frames: stack.map((frame) => ({ ...frame })) });
       i = code.startsWith(q, j) ? j + q.length : j;
       continue;
     }
@@ -571,32 +560,37 @@ function stringLiterals(code, lang) {
 /**
  * 코드에 파일 쓰기 API가 있으면 쓰기 대상일 수 있는 경로 문자열을 모은다.
  * - 경로 인자 자리(open·Path·fs.*·os.*·shutil.*·File.* 등의 인자, writeFileSync 등의 첫 인자): 공백이 있어도 경로
- * - 글 자리(replace·sub·print·startswith·write 등의 인자, writeFileSync 등의 둘째 인자부터): 경로로 보지 않음
+ * - 글 자리(print·startswith·write 등의 인자, writeFileSync 등의 둘째 인자부터, 그 안에서 부른 호출의 인자): 경로로 보지 않음
+ * - replace·sub의 찾을 글자(첫 인자)는 경로로 보지 않고, 둘째 인자부터는 결과에 들어가므로 아래처럼 본다
  * - 그 밖(변수 대입, 목록 등): 공백 없는 경로 모양 문자열만. `p = 'docs/a.md'; open(p, 'w')`를 놓치지 않으려고
  * @param {string} code
  * @param {"js" | "py" | "rb" | "pl"} lang
  */
 function inlineCodeTargets(code, lang) {
   if (!WRITE_API.test(code)) return [];
-  const out = [];
-  for (const { value: raw, callee, arg } of stringLiterals(code, lang)) {
-    // perl open의 모드가 붙은 경로(">docs/a.md", "+<docs/a.md")
-    const value = lang === "pl" ? raw.replace(/^\+?(<|>{1,2})\s*/, "") : raw;
+  /** @param {{ callee: string, arg: number }} frame */
+  const kindOf = ({ callee, arg }) => {
     const parts = callee.split(".");
     const fn = parts.at(-1) ?? "";
     const receiver = parts.at(-2) ?? "";
     const pathFirst =
       PATH_FIRST_FNS.has(fn) || ((receiver === "File" || receiver === "IO") && fn === "write");
-    let loose = false;
-    if (pathFirst) {
-      if (arg > 0) continue;
-      loose = true;
-    } else if (FILE_RECEIVERS.has(receiver) || PATH_FNS.has(fn)) {
-      loose = true;
-    } else if (TEXT_FNS.has(fn)) {
-      continue;
-    }
-    if (pathLike(value, loose)) out.push(value);
+    if (pathFirst) return arg > 0 ? "text" : "path";
+    if (FILE_RECEIVERS.has(receiver) || PATH_FNS.has(fn)) return "path";
+    if (SINK_FNS.has(fn)) return "text";
+    if (REPLACE_FNS.has(fn)) return arg > 0 ? "other" : "text";
+    return "other";
+  };
+  const out = [];
+  for (const { value: raw, frames } of stringLiterals(code, lang)) {
+    // perl open의 모드가 붙은 경로(">docs/a.md", "+<docs/a.md")
+    const value = lang === "pl" ? raw.replace(/^\+?(<|>{1,2})\s*/, "") : raw;
+    const top = frames.at(-1);
+    const kind = top ? kindOf(top) : "other";
+    if (kind === "text") continue;
+    // 글 자리 안에서 부른 replace 등(`f.write(s.replace('a', 'docs/x'))`)의 결과는 경로가 되지 않는다
+    if (kind === "other" && frames.slice(0, -1).some((frame) => kindOf(frame) === "text")) continue;
+    if (pathLike(value, kind === "path")) out.push(value);
   }
   return out;
 }
@@ -675,6 +669,8 @@ const READ_ONLY_SCRIPTS =
 /** 위 스크립트가 부르는 검사 스크립트 파일. `node scripts/check-req-trace.ts`처럼 직접 불러도 같다 */
 const READ_ONLY_SCRIPT_FILES =
   /(^|\/)scripts\/(acceptance-guard|check-migrations|check-harness-change|check-req-trace|check-erd-drift|harness-report|reset-local-db|query-local-db)\.ts$/;
+/** 직접 부를 수 있는 검사 도구. 읽기 모드(readOnlyTool)가 아니면 opaque */
+const DIRECT_TOOLS = new Set(["vitest", "tsc", "eslint", "prettier"]);
 /** pnpm·npm·yarn의 값을 받는 전역 플래그 */
 const PM_VALUE_FLAGS = ["--filter", "-F", "-C", "--dir", "--prefix", "--reporter", "--loglevel"];
 /** 파일을 쓰지 않는 git 하위 명령(xargs 뒤) */
@@ -711,7 +707,10 @@ function readOnlyTool(tool, args) {
     case "vitest":
       return positional(args)[0] !== "init";
     case "tsc":
-      return args.includes("--noEmit");
+      // `--noEmit false`·`--noEmit=false`·`--build`는 실제로 출력한다(QA 반려 #48)
+      return (
+        args.includes("--noEmit") && !args.some((a) => /^(false|--noEmit=.*|-b|--build)$/i.test(a))
+      );
     case "eslint":
       return true;
     case "prettier":
@@ -782,6 +781,12 @@ function stdinCode(seg, prev, dir) {
     else if (name === "cat") for (const file of positional(words.slice(1))) out.push(read(file));
   }
   return out.filter(Boolean);
+}
+
+/** 셸·인터프리터가 훅이 읽을 수 없는 표준 입력(`git log … | sh`, `curl … | python3`)을 실행하는가 */
+function unknownStdin(seg, prev) {
+  if (!seg.pipeIn || !prev || prev.heredocs.length > 0) return false;
+  return !["echo", "printf", "cat"].includes(basename(stripPrefix(prev.words)[0] ?? ""));
 }
 
 /**
@@ -945,7 +950,21 @@ export function analyzeCommand(command, cwd, depth = 0) {
       case "awk":
       case "gawk": {
         const index = args.indexOf("-i");
-        if (index === -1 || !/inplace/.test(args[index + 1] ?? "")) break;
+        if (index === -1 || !/inplace/.test(args[index + 1] ?? "")) {
+          // 프로그램 안의 `print > "파일"`·`| "명령"`·system()도 쓰기다(QA 반려 #48)
+          const program = args.some((a) => a === "-f" || a === "--file")
+            ? null
+            : positional(args, ["-v", "-F", "--assign", "--field-separator"])[0];
+          if (program === null) opaque.push(`${name} -f`);
+          else if (program && /[>|]|system\s*\(/.test(program)) {
+            const files = [...program.matchAll(/>{1,2}\s*"([^"]+)"/g)].map((m) => m[1] ?? "");
+            for (const p of files) add(p, "write", `${name} 리다이렉트`);
+            if (files.length === 0 || /\||system\s*\(|>{1,2}\s*[^\s"]/.test(program)) {
+              opaque.push(`${name} 쓰기`);
+            }
+          }
+          break;
+        }
         const files = positional(args, ["-i", "-f", "-v", "-F", "-e", "--include", "--file"]);
         const hasProgramFlag = args.some((a) => a === "-f" || a === "-e" || a === "--file");
         for (const p of hasProgramFlag ? files : files.slice(1)) add(p, "write", "awk -i inplace");
@@ -1059,7 +1078,13 @@ export function analyzeCommand(command, cwd, depth = 0) {
         for (let i = 0; i < args.length; i++) {
           if (codeFlags.includes(args[i] ?? "")) {
             hasCode = true;
-            for (const p of inlineCodeTargets(args[i + 1] ?? "", lang)) add(p, "write", name);
+            const code = args[i + 1] ?? "";
+            for (const p of inlineCodeTargets(code, lang)) add(p, "write", name);
+            // 코드가 인자(sys.argv, process.argv, ARGV)로 받은 경로에 쓰면 뒤의 인자가 쓰기 대상이다(QA 반려 #48)
+            if (WRITE_API.test(code) && /\bargv\b|\bARGV\b/.test(code)) {
+              for (const p of positional(args.slice(i + 2))) add(p, "write", `${name} 인자`);
+            }
+            i++;
           }
         }
         const script = positional(args).find((a) => a !== "-");
@@ -1071,6 +1096,7 @@ export function analyzeCommand(command, cwd, depth = 0) {
         } else if (args.includes("-m")) opaque.push(`${name} -m`);
         else if (!hasCode) {
           // python3 - <<'EOF', node <<'EOF', echo '…' | python3 같은 표준 입력 코드도 -c/-e처럼 본다
+          if (unknownStdin(seg, previous)) opaque.push(`${name} 표준 입력`);
           for (const code of stdinCode(seg, previous, dir)) {
             for (const p of inlineCodeTargets(code, lang)) add(p, "write", `${name} 표준 입력`);
           }
@@ -1128,6 +1154,8 @@ export function analyzeCommand(command, cwd, depth = 0) {
       case "zsh":
       case "dash": {
         const index = args.indexOf("-c");
+        // bash -c "$X": 변수·치환이 든 코드는 무엇을 실행하는지 모른다(QA 반려 #48). 보이는 부분은 그대로 분석한다
+        if (index !== -1 && dynamic(args[index + 1] ?? "")) opaque.push(`${name} -c 변수`);
         if (index !== -1 && depth < 3) {
           const inner = analyzeCommand(args[index + 1] ?? "", dir, depth + 1);
           targets.push(...inner.targets);
@@ -1138,6 +1166,7 @@ export function analyzeCommand(command, cwd, depth = 0) {
           opaque.push(`${name} 스크립트`);
         } else if (index === -1 && depth < 3) {
           // bash <<'EOF', bash -s < x.sh, echo '…' | sh: 표준 입력의 명령도 분석한다
+          if (unknownStdin(seg, previous)) opaque.push(`${name} 표준 입력`);
           for (const code of stdinCode(seg, previous, dir)) {
             const inner = analyzeCommand(code, dir, depth + 1);
             targets.push(...inner.targets);
@@ -1226,8 +1255,53 @@ export function analyzeCommand(command, cwd, depth = 0) {
         }
         break;
       }
+      case "curl": {
+        // -o 파일, --output-dir 디렉터리. -O(원격 이름)는 어디에 쓰는지 모른다(QA 반려 #48)
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i] ?? "";
+          const short = /^-([a-zA-Z]*?)([oO])(.*)$/.exec(a); // -o 파일, -sSo 파일, -ofile, -sSLO
+          if (a === "--output") add(args[++i] ?? "", "write", "curl -o");
+          else if (a.startsWith("--output=")) add(a.slice(9), "write", "curl -o");
+          else if (a === "--output-dir") add(args[++i] ?? "", "tree", "curl --output-dir");
+          else if (a === "--remote-name" || a === "--remote-name-all") opaque.push("curl -O");
+          else if (short && !a.startsWith("--")) {
+            if (short[2] === "O") opaque.push("curl -O");
+            else add(short[3] || (args[++i] ?? ""), "write", "curl -o");
+          }
+        }
+        break;
+      }
+      case "wget": {
+        // -O 파일(-O -는 표준 출력), -P 디렉터리. 둘 다 없으면 현재 디렉터리에 쓴다(QA 반려 #48)
+        let known = false;
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i] ?? "";
+          const short = /^-([a-zA-Z]*?)([OP])(.*)$/.exec(a); // -O 파일, -qO-, -qO 파일, -P 디렉터리
+          let flag = null;
+          let p = "";
+          if (a === "--output-document" || a === "--directory-prefix") {
+            flag = a === "--output-document" ? "O" : "P";
+            p = args[++i] ?? "";
+          } else if (/^--(output-document|directory-prefix)=/.test(a)) {
+            flag = a.startsWith("--output") ? "O" : "P";
+            p = a.slice(a.indexOf("=") + 1);
+          } else if (short && !a.startsWith("--")) {
+            flag = short[2] ?? null;
+            p = short[3] || (args[++i] ?? "");
+          }
+          if (flag) {
+            known = true;
+            if (flag === "P") add(p, "tree", "wget -P");
+            else if (p !== "-") add(p, "write", "wget -O");
+          }
+        }
+        if (!known) opaque.push("wget");
+        break;
+      }
       default:
         if (RUNNERS.has(name) && !runsReadOnly(name, args)) opaque.push(name);
+        // 직접 부른 검사 도구가 쓰기 모드면(prettier --write, eslint --fix, tsc 출력, vitest -u) 무엇을 쓰는지 모른다
+        else if (DIRECT_TOOLS.has(name) && !readOnlyTool(name, args)) opaque.push(name);
         break;
     }
   }
@@ -1295,6 +1369,44 @@ function writesFile(segments) {
   );
 }
 
+/** 셸·인터프리터·스크립트 파일처럼 훅이 내용을 못 보는 것을 실행하는 세그먼트인가 */
+const EXECUTORS = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ksh",
+  "fish",
+  "eval",
+  "source",
+  ".",
+  "xargs",
+]);
+const INTERPRETERS = new Set([
+  "python",
+  "python3",
+  "node",
+  "deno",
+  "bun",
+  "perl",
+  "ruby",
+  "tsx",
+  "ts-node",
+]);
+function executes(/** @type {Segment} */ seg, /** @type {boolean} */ forMention) {
+  const words = stripPrefix(seg.words);
+  const raw = words[0] ?? "";
+  const name = basename(raw);
+  const args = words.slice(1);
+  if (!raw) return false;
+  if (raw.includes("/") || raw.startsWith("~")) return true; // ./x.sh, /tmp/x.sh
+  if (EXECUTORS.has(name)) return true;
+  if (INTERPRETERS.has(name))
+    return !args.some((a) => /^(-e|--eval|-p|--print|-c|-[a-zA-Z]*[eE])$/.test(a));
+  // 명령 규칙: 검사·테스트가 아닌 러너(`pnpm exec sh x.sh`, `npx …`)도 실행으로 본다
+  return !forMention && RUNNERS.has(name) && !runsReadOnly(name, args);
+}
+
 /**
  * 데이터로 볼 인자의 위치(words 기준, 0은 명령 이름).
  * @param {string} name
@@ -1354,6 +1466,9 @@ function dataArgIndexes(name, words, forMention) {
  */
 export function stripData(command, { forMention = false } = {}) {
   const segments = parseShell(command);
+  // 같은 명령에서 셸·스크립트를 실행하면 데이터(파일에 쓴 글, 커밋 메시지)가 실행될 수 있다:
+  // `echo '…' > x.sh && sh x.sh`, `git commit -m '…' && git log -1 --format=%s | sh`. 아무것도 빼지 않는다(QA 반려 #48)
+  if (segments.some((seg) => executes(seg, forMention))) return command;
   /** @type {[number, number][]} */
   const spans = [];
   segments.forEach((seg, index) => {

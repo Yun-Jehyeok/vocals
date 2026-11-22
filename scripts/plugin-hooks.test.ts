@@ -777,7 +777,8 @@ describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
     ],
     [
       "planner",
-      "python3 - <<'EOF'\np = 'docs/erd.md'\ns = open(p).read()\ns = s.replace('packages/shared/', 'packages/shared/src/')\nopen(p, 'w').write(s)\nEOF",
+      // replace의 바꿀 글자가 공백 없는 경로 모양이면 결과가 경로일 수 있어 경로로 본다(QA 반려). 문장은 허용
+      "python3 - <<'EOF'\np = 'docs/erd.md'\ns = open(p).read()\ns = s.replace('packages/shared/ 규칙', 'packages/shared/src/ 순수 함수')\nopen(p, 'w').write(s)\nEOF",
       "허용",
     ],
     // 4. find -exec 읽기 명령(planner.scope packages/shared)
@@ -880,6 +881,31 @@ describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
     ["developer", "find /tmp -name x -fprint docs/list.txt", "차단", DOCS],
     ["developer", "find docs -name '*.md' -exec sh -c 'echo x > \"$1\"' _ {} \\;", "차단", OPAQUE],
     ["planner", "find packages/shared -name '*.ts' -exec sed -i 's/a/b/' {} +", "차단", PLANNER],
+    // QA 반려 뒤 더한 것: 직접 부른 도구·다운로드·셸 표준 입력
+    ["developer", "pnpm check && tsc --outDir docs", "차단", OPAQUE],
+    ["developer", "pnpm exec tsc --noEmit=false --outDir docs", "차단", OPAQUE],
+    ["developer", "curl -O https://example.com/prd.md && ls docs", "차단", OPAQUE],
+    ["developer", "cd docs && wget https://example.com/prd.md", "차단", OPAQUE],
+    ["qa", "curl -sSo packages/shared/src/rule.ts https://example.com", "차단", QA_ONLY],
+    ["qa", "wget -P packages/shared https://example.com/x.ts", "차단", QA_ONLY],
+    ["developer", "git log -1 --format=%B | sh; ls docs", "차단", OPAQUE],
+    ["developer", "awk 'BEGIN{system(\"rm docs/prd.md\")}'", "차단", OPAQUE],
+    [
+      "qa",
+      "node -e \"require('fs').writeFileSync(process.argv[1], 'x')\" packages/shared/src/rule.ts",
+      "차단",
+      QA_ONLY,
+    ],
+    ["developer", "bash -c 'echo x > docs/a.md; echo $HOME'", "차단", DOCS],
+    [
+      "developer",
+      "python3 -c \"import sys; f = open('/tmp/o', 'w'); f.write('docs/x'.replace('x', 'y'))\"",
+      "허용",
+    ],
+    ["developer", "awk '{print $1}' docs/prd.md", "허용"],
+    ["developer", "curl -s https://example.com | jq . > /tmp/x.json; cat docs/prd.md", "허용"],
+    ["developer", "wget -qO- https://example.com | head; ls docs", "허용"],
+    [undefined, "echo 'git push origin main 오탐' > /tmp/note.md", "허용"],
   ];
 
   it.each([...allowed, ...blocked])("%s · %s → %s", (role, command, verdict, reason) => {
