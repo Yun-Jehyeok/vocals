@@ -5,13 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { block, readInput, run } from "./lib/io.mjs";
 import { findRepoRoot, mentionsProtected, PathRules, roleOf } from "./lib/rules.mjs";
-import {
-  analyzeCommand,
-  commitSources,
-  pushInfo,
-  stripDataHeredocs,
-  TRAILER_LINE,
-} from "./lib/shell.mjs";
+import { analyzeCommand, commitSources, pushInfo, stripData, TRAILER_LINE } from "./lib/shell.mjs";
 
 const REMOTE_DB = {
   why: "원격 Supabase 프로젝트의 스키마·데이터·설정을 바로 바꾸고 되돌리기 어렵습니다. 스키마는 마이그레이션 파일과 PR로만 바꿉니다(CLAUDE.md).",
@@ -148,9 +142,9 @@ run(() => {
   const role = roleOf(input.agent_type);
   const cwd = String(input.cwd ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
 
-  // `cat > 파일 <<'EOF'`, `git commit -F - <<'EOF'`의 본문(데이터)에 든 "git push origin main" 같은 글자는
-  // 명령이 아니므로 뺀다. 인터프리터·셸 표준 입력의 heredoc은 남긴다.
-  const ruleText = stripDataHeredocs(command);
+  // `cat > 파일 <<'EOF'`, `git commit -F - <<'EOF'`의 본문, `gh api -f body=…`·`git commit -m`·echo·jq의 인자(데이터)에
+  // 든 "git push origin main" 같은 글자는 명령이 아니므로 뺀다. 인터프리터·셸 표준 입력과 명령 치환은 남긴다(이슈 #48).
+  const ruleText = stripData(command);
   for (const rule of COMMAND_RULES) {
     if (rule.test.test(ruleText)) block({ ...rule, target: command, root: cwd });
   }
@@ -178,7 +172,8 @@ run(() => {
   if (role === "developer" && opaque.length > 0) {
     const root = findRepoRoot(cwd);
     const protectedPaths = root ? rules.repo(root).protectedPaths : [];
-    const mentioned = mentionsProtected(command, protectedPaths);
+    // PR 본문·커밋 메시지 같은 데이터에 든 경로 글자는 빼고 본다. 파일로 쓰는 데이터는 남긴다(이슈 #48)
+    const mentioned = mentionsProtected(stripData(command, { forMention: true }), protectedPaths);
     if (mentioned) {
       block({
         rule: "developer.opaque-write",

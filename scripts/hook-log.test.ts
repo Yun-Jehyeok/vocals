@@ -1,5 +1,5 @@
-// 훅 차단 로그 단위 테스트 (이슈 #17 하네스 6단계)
-// 임시 vocals 모양 저장소에서 훅을 돌리고 `.claude/logs/<날짜>-<세션>.jsonl`에 남는 줄을 확인한다.
+// 훅 차단 로그 단위 테스트 (이슈 #17 하네스 6단계, #48 위치·이름)
+// 임시 vocals 모양 저장소에서 훅을 돌리고 `.claude/logs/<날짜>-<세션>-<브랜치>.jsonl`에 남는 줄을 확인한다.
 // 명령 원문·파일 내용·도구 인자 값이 로그에 들어가지 않는지가 핵심이다.
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -23,6 +23,7 @@ const SESSION = "abcd1234-5678-90ef-aaaa-bbbbccccdddd";
 let repo: string;
 let outside: string;
 let worktree: string;
+let copy: string;
 
 function git(cwd: string, ...args: string[]) {
   return execFileSync(
@@ -66,6 +67,10 @@ beforeAll(() => {
   git(repo, "checkout", "-q", "-b", "work");
   worktree = join(outside, "wt-17");
   git(repo, "worktree", "add", "-q", worktree, "main");
+  // worktree가 아닌 /tmp 복사본(별도 clone)
+  copy = join(outside, "copy");
+  git(outside, "clone", "-q", "--branch", "work", repo, copy);
+  git(copy, "checkout", "-q", "-b", "qa/probe");
 });
 
 afterAll(() => {
@@ -76,6 +81,7 @@ afterAll(() => {
 beforeEach(() => {
   rmSync(join(repo, ".claude"), { recursive: true, force: true });
   rmSync(join(worktree, ".claude"), { recursive: true, force: true });
+  rmSync(join(copy, ".claude"), { recursive: true, force: true });
 });
 
 function runHook(script: string, input: Record<string, unknown>, env: Record<string, string> = {}) {
@@ -118,7 +124,7 @@ function rawLog(root: string) {
 }
 
 describe("훅 차단 로그 (이슈 #17 6단계)", () => {
-  it("차단하면 .claude/logs/<날짜>-<세션 앞 8자>.jsonl에 정해진 필드로 한 줄을 남긴다", () => {
+  it("차단하면 .claude/logs/<날짜>-<세션 앞 8자>-<브랜치>.jsonl에 정해진 필드로 한 줄을 남긴다", () => {
     const result = runHook("guard-files.mjs", {
       agent_type: "vocals-team:developer",
       tool_name: "Edit",
@@ -127,7 +133,7 @@ describe("훅 차단 로그 (이슈 #17 6단계)", () => {
     expect(result.status).toBe(2);
     const files = logFiles(repo);
     expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/\/\.claude\/logs\/\d{4}-\d{2}-\d{2}-abcd1234\.jsonl$/);
+    expect(files[0]).toMatch(/\/\.claude\/logs\/\d{4}-\d{2}-\d{2}-abcd1234-work\.jsonl$/);
     const [line] = logLines(repo);
     expect(line).toEqual({
       ts: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
@@ -201,26 +207,76 @@ describe("훅 차단 로그 (이슈 #17 6단계)", () => {
     expect(logFiles(repo)).toEqual([]);
   });
 
-  it("수동 worktree의 파일이면 그 worktree의 .claude/logs/에 쓴다", () => {
+  it("수동 worktree의 파일이면 메인 체크아웃의 .claude/logs/에 worktree 브랜치 이름으로 쓴다 (#48)", () => {
     const result = runHook("guard-files.mjs", {
       agent_type: "developer",
       tool_name: "Edit",
       tool_input: { file_path: join(worktree, "docs/prd.md") },
     });
     expect(result.status).toBe(2);
-    expect(logLines(worktree)).toMatchObject([{ rule: "developer.docs", target: "docs/prd.md" }]);
-    expect(logFiles(repo)).toEqual([]);
+    expect(logLines(repo)).toMatchObject([{ rule: "developer.docs", target: "docs/prd.md" }]);
+    expect(logFiles(repo)[0]).toMatch(/-abcd1234-main\.jsonl$/);
+    expect(logFiles(worktree)).toEqual([]);
   });
 
-  it("worktree 안에서 실행한 명령 규칙도 그 worktree에 쓴다", () => {
+  it("worktree 안에서 실행한 명령 규칙도 메인 체크아웃에 쓴다 (#48)", () => {
     const result = runHook("guard-bash.mjs", {
       cwd: worktree,
       tool_name: "Bash",
       tool_input: { command: "git push --force origin work" },
     });
     expect(result.status).toBe(2);
-    expect(logLines(worktree)).toMatchObject([{ rule: "bash.force-push" }]);
-    expect(logFiles(repo)).toEqual([]);
+    expect(logLines(repo)).toMatchObject([{ rule: "bash.force-push" }]);
+    expect(logFiles(worktree)).toEqual([]);
+  });
+
+  it("세션 프로젝트가 worktree여도 메인 체크아웃에 쓴다 (#48)", () => {
+    const result = runHook(
+      "guard-bash.mjs",
+      { cwd: worktree, tool_name: "Bash", tool_input: { command: "git push origin main" } },
+      { CLAUDE_PROJECT_DIR: worktree },
+    );
+    expect(result.status).toBe(2);
+    expect(logLines(repo)).toMatchObject([{ rule: "bash.push-main" }]);
+    expect(logFiles(worktree)).toEqual([]);
+  });
+
+  it("worktree가 아닌 /tmp 복사본에서 막혀도 세션 프로젝트의 메인 체크아웃에 쓴다 (#48)", () => {
+    const result = runHook("guard-files.mjs", {
+      cwd: copy,
+      agent_type: "qa",
+      tool_name: "Write",
+      tool_input: { file_path: join(copy, "packages/shared/src/rule.ts") },
+    });
+    expect(result.status).toBe(2);
+    expect(logLines(repo)).toMatchObject([
+      { rule: "qa.scope", target: "packages/shared/src/rule.ts" },
+    ]);
+    expect(logFiles(repo)[0]).toMatch(/-abcd1234-qa-probe\.jsonl$/);
+    expect(logFiles(copy)).toEqual([]);
+  });
+
+  it("같은 세션이라도 브랜치가 다르면 다른 파일에 쓴다(PR끼리 같은 파일을 고치지 않음) (#48)", () => {
+    const push = { tool_name: "Bash", tool_input: { command: "git push origin main" } };
+    runHook("guard-bash.mjs", push);
+    runHook("guard-bash.mjs", { ...push, cwd: worktree });
+    runHook("guard-bash.mjs", push);
+    const names = logFiles(repo).map((file) => file.slice(file.lastIndexOf("/") + 1));
+    expect(names).toHaveLength(2);
+    expect(names.filter((name) => name.endsWith("-abcd1234-work.jsonl"))).toHaveLength(1);
+    expect(names.filter((name) => name.endsWith("-abcd1234-main.jsonl"))).toHaveLength(1);
+    expect(logLines(repo)).toHaveLength(3);
+  });
+
+  it("브랜치 이름은 파일 이름에 쓸 수 있게 바꾼다 (#48)", async () => {
+    const url = pathToFileURL(join(HOOKS, "lib", "log.mjs")).href;
+    const { branchSlug } = (await import(url)) as { branchSlug: (branch: string) => string };
+    expect(branchSlug("fix/48-hook-false-positives")).toBe("fix-48-hook-false-positives");
+    expect(branchSlug("feat/a b:c")).toBe("feat-a-b-c");
+    expect(branchSlug("HEAD")).toBe("detached");
+    expect(branchSlug("")).toBe("detached");
+    expect(branchSlug("../../x")).toBe("x");
+    expect(branchSlug("a".repeat(100))).toHaveLength(80);
   });
 
   it("session_ 접두어는 빼고 앞 8자를 쓴다", () => {
@@ -230,7 +286,7 @@ describe("훅 차단 로그 (이슈 #17 6단계)", () => {
       tool_input: { command: "git push origin main" },
     });
     expect(logLines(repo)).toMatchObject([{ session: "018vooJ3" }]);
-    expect(logFiles(repo)[0]).toMatch(/-018vooJ3\.jsonl$/);
+    expect(logFiles(repo)[0]).toMatch(/-018vooJ3-work\.jsonl$/);
   });
 
   it("로그를 쓰지 못해도 차단은 그대로 한다", () => {

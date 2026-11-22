@@ -677,6 +677,222 @@ describe("guard-bash: 명령 규칙과 Bash 파일 쓰기 (이슈 #17)", () => {
   });
 });
 
+describe("guard-bash: 오탐 정리 (이슈 #48)", () => {
+  const OPAQUE = "풀 수 없는 쓰기";
+  // 실제 차단 기록(.claude/logs, #17 댓글, #23·#32·#38·#41)과 같은 종류의 명령. 이제 허용한다
+  const allowed: BashRow[] = [
+    // 1. 테스트·검사 실행 + 보호 경로 문자열(developer.opaque-write, 로그 target tests/acceptance/·supabase/migrations/)
+    ["developer", "pnpm vitest run supabase/tests/acceptance/17-example.test.ts", "허용"],
+    ["developer", "cd supabase && pnpm vitest run tests/acceptance/17-example.test.ts", "허용"],
+    ["developer", "pnpm --filter @vocals/supabase exec vitest run tests/acceptance", "허용"],
+    ["developer", "pnpm -C supabase test -- tests/acceptance/17-example.test.ts", "허용"],
+    ["developer", "npx vitest run supabase/tests/acceptance/", "허용"],
+    ["developer", "pnpm test 2>&1 | tail -20; ls supabase/migrations/", "허용"],
+    ["developer", "pnpm check && git diff --stat origin/main -- supabase/migrations/", "허용"],
+    ["developer", "pnpm check:migrations; cat supabase/migrations/20260101000000_init.sql", "허용"],
+    ["developer", "pnpm run check:req-trace && grep -n PAY docs/prd.md", "허용"],
+    ["developer", "pnpm db:reset && ls supabase/migrations/", "허용"],
+    ["developer", 'pnpm db:query "select 1" && cat supabase/tests/helpers/db.ts', "허용"],
+    ["developer", "pnpm typecheck && pnpm lint && cat docs/prd.md", "허용"],
+    ["developer", "pnpm exec prettier --check docs/ supabase/tests/acceptance/", "허용"],
+    ["developer", "npx tsc --noEmit -p supabase && ls supabase/tests/acceptance", "허용"],
+    [
+      "developer",
+      "node --experimental-strip-types scripts/acceptance-guard.ts && ls supabase/tests/acceptance",
+      "허용",
+    ],
+    [
+      "developer",
+      "ls supabase/tests/acceptance | xargs -I{} git log -1 --format=%s -- supabase/tests/acceptance/{}",
+      "허용",
+    ],
+    ["developer", "ls supabase/tests/acceptance | xargs pnpm vitest run", "허용"],
+    ["developer", 'cd "$(git rev-parse --show-toplevel)" && cat docs/prd.md', "허용"],
+    // 2. 데이터 인자·heredoc의 경로 글자(gh api -f, jq, printf, git commit -m, gh --body-file -)
+    [
+      "developer",
+      "pnpm format && gh api repos/o/r/pulls/1 -X PATCH -f body='docs/prd.md 확인, supabase/migrations/ 추가'",
+      "허용",
+    ],
+    ["developer", 'pnpm format && git commit -m "fix: supabase/migrations/ 이름 확인"', "허용"],
+    [
+      "developer",
+      "pnpm format && gh pr create --draft --body-file - <<'EOF'\n- docs/prd.md 참고\nEOF",
+      "허용",
+    ],
+    [
+      "developer",
+      "pnpm format; gh api x --jq '.[] | select(.filename | startswith(\"supabase/migrations/\"))'",
+      "허용",
+    ],
+    [
+      "developer",
+      "pnpm format && jq -r '.files[] | select(startswith(\"docs/\"))' /tmp/pr.json",
+      "허용",
+    ],
+    ["developer", "pnpm format; printf '%s\\n' 'docs/prd.md'", "허용"],
+    // 명령 규칙(push·원격 DB)도 데이터 인자의 글자는 보지 않는다
+    [
+      undefined,
+      "gh api repos/o/r/issues/1/comments -f body='막힌 명령: git push origin main'",
+      "허용",
+    ],
+    [undefined, 'git commit -m "fix: git push origin main 오탐 수정"', "허용"],
+    [undefined, "grep -rn 'supabase db push' plugins/", "허용"],
+    [undefined, "jq -n --arg cmd 'supabase db push --linked' '{cmd: $cmd}'", "허용"],
+    [undefined, "echo 'git push --force origin x 는 막힌다'", "허용"],
+    [undefined, "printf '%s\\n' 'git push origin main' > /tmp/note.md", "허용"],
+    [undefined, "gh api x -f body='`code` 안의 git push origin main'", "허용"],
+    // 3. 인터프리터 코드의 글(PR 본문·문서 내용)에 든 경로(qa.scope #38·#41, planner.scope packages/shared)
+    [
+      "qa",
+      "python3 - <<'EOF'\nbody = open('/tmp/pr.md').read()\nbody = body.replace('vitest run tests/acceptance', 'pnpm vitest run supabase/tests/acceptance')\nopen('/tmp/pr.md', 'w').write(body)\nEOF",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 - <<'EOF'\nbody = '''\n## 확인\n- `20261122090000_client_insert_authorization.sql` 정책\n- 'supabase/seed.sql' 더미 사용자\n'''\nopen('/tmp/body.md', 'w').write(body)\nEOF",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 - <<'EOF'\nimport json\nb = json.load(open('/tmp/pr.json'))['body']\nb = b.replace('supabase/migrations/20261122090000_client_insert_authorization.sql', 'x')\nopen('/tmp/body.md', 'w').write(b)\nEOF",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 -c \"import json; json.dump({'body': 'packages/shared/src/rule.ts 수정 필요'}, open('/tmp/b.json', 'w'))\"",
+      "허용",
+    ],
+    ["qa", "python3 -c \"open('/tmp/n.md', 'w').write('packages/shared/src/rule.ts')\"", "허용"],
+    [
+      "qa",
+      "node -e \"require('fs').writeFileSync('/tmp/b.md', 'packages/shared/src/rule.ts')\"",
+      "허용",
+    ],
+    [
+      "qa",
+      "python3 - <<'EOF'\n# don't touch packages/shared/src/rule.ts\nopen('/tmp/x', 'w').write('x')\nEOF",
+      "허용",
+    ],
+    [
+      "planner",
+      "python3 - <<'EOF'\np = 'docs/erd.md'\ns = open(p).read()\ns = s.replace('packages/shared/', 'packages/shared/src/')\nopen(p, 'w').write(s)\nEOF",
+      "허용",
+    ],
+    // 4. find -exec 읽기 명령(planner.scope packages/shared)
+    ["planner", "find packages/shared -name '*.ts' -exec sed -n '1,5p' {} \\;", "허용"],
+    ["planner", "find packages/shared -type f -exec perl -ne 'print if /PAY/' {} +", "허용"],
+    ["planner", "find packages/shared -name '*.ts' -exec cp {} /tmp/ \\;", "허용"],
+    ["developer", "find docs -name '*.md' -exec grep -l PAY {} +", "허용"],
+  ];
+
+  // 진짜 쓰기는 그대로 막는다
+  const blocked: BashRow[] = [
+    // 파일을 쓰는 러너 인자: 스냅샷 갱신, --write, --fix, --update, 포맷
+    ["developer", "pnpm vitest run -u supabase/tests/acceptance/", "차단", OPAQUE],
+    [
+      "developer",
+      "pnpm test -- --update supabase/tests/acceptance/17-example.test.ts",
+      "차단",
+      OPAQUE,
+    ],
+    ["developer", "npx prettier --write docs/prd.md", "차단", OPAQUE],
+    ["developer", "pnpm exec eslint --fix supabase/tests/acceptance/", "차단", OPAQUE],
+    ["developer", "pnpm format && cat docs/prd.md", "차단", OPAQUE],
+    ["developer", "npx -c 'vitest run' docs/", "차단", OPAQUE],
+    ["developer", "node scripts/check-req-trace.ts --update docs/", "차단", OPAQUE],
+    ["developer", "pnpm vitest init docs/", "차단", OPAQUE],
+    // 모르는 곳으로 cd한 뒤의 쓰기
+    ["developer", 'cd "$(git rev-parse --show-toplevel)" && echo x > docs/prd.md', "차단", OPAQUE],
+    ["developer", "cd $X && git -C docs rm prd.md", "차단", OPAQUE],
+    // 파일로 쓴 데이터(나중에 실행될 수 있다)와 파이프로 쓰기 명령에 넘기는 데이터
+    ["developer", "printf 'rm -rf docs\\n' > /tmp/x.sh && bash /tmp/x.sh", "차단", OPAQUE],
+    ["developer", "cat > /tmp/x.sh <<'EOF'\nrm -rf docs\nEOF\nbash /tmp/x.sh", "차단", OPAQUE],
+    ["developer", "echo docs/prd.md | xargs rm", "차단", OPAQUE],
+    [
+      "developer",
+      "gh api x --jq '.[].filename' > /tmp/l && xargs rm < /tmp/l; ls docs",
+      "차단",
+      OPAQUE,
+    ],
+    // 명령 규칙: 실행되는 데이터
+    [undefined, "echo 'git push origin main' | sh", "차단", "main에 직접 push"],
+    [undefined, 'echo "$(git push origin main)"', "차단", "main에 직접 push"],
+    [undefined, 'gh api x -f body="$(supabase db push)"', "차단", "db push"],
+    [undefined, "gh api x -f body=`supabase db push`", "차단", "db push"],
+    [undefined, 'git commit -m "x" && git push origin main', "차단", "main에 직접 push"],
+    [undefined, 'git commit -m "$(git push origin main)"', "차단", "main에 직접 push"],
+    [undefined, "grep -l x docs/*.md | xargs -I{} sh -c 'supabase db push'", "차단", "db push"],
+    // 인터프리터 코드의 진짜 쓰기(변수·목록·경로 인자, 공백 있는 경로)
+    [
+      "qa",
+      "python3 - <<'EOF'\np = 'packages/shared/src/rule.ts'\nopen(p, 'w').write('x')\nEOF",
+      "차단",
+      QA_ONLY,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nfor f in ['docs/a.md', 'docs/b.md']:\n    open(f, 'w').write('x')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    ["developer", "python3 -c \"open('docs/my notes.md', 'w').write('x')\"", "차단", DOCS],
+    ["developer", "node -e \"require('fs').writeFileSync('docs/a b.md', 'x')\"", "차단", DOCS],
+    [
+      "developer",
+      "python3 - <<'EOF'\nimport shutil\nshutil.copy('/tmp/x', 'docs/prd.md')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nimport os\nos.replace('/tmp/x', 'docs/prd.md')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nbody = open('docs/prd.md').read().replace('a', 'b')\nopen('docs/prd.md', 'w').write(body)\nEOF",
+      "차단",
+      DOCS,
+    ],
+    [
+      "developer",
+      "python3 - <<'EOF'\nfrom pathlib import Path\nPath('docs/prd.md').write_text('packages/shared')\nEOF",
+      "차단",
+      DOCS,
+    ],
+    ["developer", 'perl -e \'open(my $f, ">", "docs/prd.md")\'', "차단", DOCS],
+    ["developer", "perl -e 'open(F, \">docs/prd.md\")'", "차단", DOCS],
+    ["developer", "ruby -e \"File.write('docs/prd.md', 'packages')\"", "차단", DOCS],
+    [
+      "developer",
+      "node -e \"const p = 'docs/prd.md'; require('fs').appendFileSync(p, 'x')\"",
+      "차단",
+      DOCS,
+    ],
+    // find의 진짜 쓰기
+    ["developer", "find docs -name '*.md' -exec sed -i 's/a/b/' {} +", "차단", DOCS],
+    ["developer", "find /tmp/src -name '*.md' -exec cp {} docs/ \\;", "차단", DOCS],
+    ["developer", "find docs -exec mv {} /tmp/ \\;", "차단", DOCS],
+    ["developer", "find docs -name '*.md' -exec cp /tmp/x {} \\;", "차단", DOCS],
+    ["developer", "find /tmp -name x -fprint docs/list.txt", "차단", DOCS],
+    ["developer", "find docs -name '*.md' -exec sh -c 'echo x > \"$1\"' _ {} \\;", "차단", OPAQUE],
+    ["planner", "find packages/shared -name '*.ts' -exec sed -i 's/a/b/' {} +", "차단", PLANNER],
+  ];
+
+  it.each([...allowed, ...blocked])("%s · %s → %s", (role, command, verdict, reason) => {
+    const result = runHook("guard-bash.mjs", {
+      tool_name: "Bash",
+      cwd: repo,
+      ...roleInput(role),
+      tool_input: { command },
+    });
+    expectVerdict(result, verdict, reason);
+  });
+});
+
 describe("guard-mcp: 위험한 Supabase MCP 도구 (이슈 #17)", () => {
   const dangerous = [
     "create_project",
