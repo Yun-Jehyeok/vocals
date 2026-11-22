@@ -175,7 +175,7 @@ React Native에서는 iOS `shadowColor/Offset/Opacity/Radius`, Android `elevatio
 | S-14 숙제 상세 | [기본](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S14-default) · [빈 화면(예시 영상·제출 없음)](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S14-empty) · [로딩](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S14-loading) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S14-error) · [권한 없음](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S14-forbidden) | HW-02, HW-07, HW-12 |
 | T-06 트레이너 홈 | [기본](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-T06-default) · [빈 화면](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-T06-empty) · [로딩](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-T06-loading) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-T06-error) | ATT-04, PAY-05, PAY-10 |
 | C-02 로그인 | [기본(iOS)](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C02-ios) · [기본(Android)](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C02-android) · [로딩](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C02-loading) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C02-error) | AUTH-01 |
-| C-03 본인인증 앞뒤 안내 | [인증 전 안내](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-before) · [결과 확인 중](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-loading) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-error) · [만 19세 미만](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-underage) | AUTH-03 |
+| C-03 본인인증 앞뒤 안내 | [인증 전 안내](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-before) · [결과 확인 중](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-loading) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-error) · [만 19세 미만](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-underage) · [이미 가입한 계정(카카오)](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C03-already) | AUTH-03 |
 | C-04 역할 선택 | [기본(고르기 전)](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C04-default) · [학생을 고름](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C04-selected) · [저장 중](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C04-loading) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C04-error) | AUTH-02, AUTH-04 |
 | C-05 프로필 설정 | [기본(비어 있음)](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C05-default) · [입력함](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C05-filled) · [저장 중](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C05-loading) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-C05-error) | AUTH-06, CHAT-04 |
 | S-05 첫 홈 | [기본](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S05-default) · [링크 확인 중](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S05-loading) · [링크 오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S05-link-error) · [오류](https://claude.ai/artifact/PUswzb8Yft4ytPKsd5DKv8#artboard-S05-error) | MKT-01 |
@@ -188,12 +188,12 @@ React Native에서는 iOS `shadowColor/Offset/Opacity/Radius`, Android `elevatio
 - **S-01**: 사진·이름·지역·장르·후기 수 → 소개·노래 영상(가로 스크롤, 최대 3개) → 소개글 → 경력 → 레슨 장소 → 레슨 상품(1:1 / 그룹 전환, 정기권 회차별 가격·일회권 가격, 레슨 길이, 유효기간 1년) → 후기(최신 2개 + 'n개 모두 보기' → S-22) → 하단 고정 [문의하기 → S-21] [상품 고르기]. 상품 줄을 누르면 S-02. 파일럿 링크로 들어오면 레슨 상품 섹션이 없고 하단이 [문의하기] [시작하기 → S-03]. 볼 수 없는 프로필(정지·잘못된 링크, ADM-02)은 '볼 수 없음' 상태.
 - **S-04**: 인사말 → 재결제 배너(수강권 1회 남음일 때만) → 다가오는 레슨(→ S-11, 전체 → S-10) → 해야 할 숙제(미제출, 마감 임박 순, → S-14, 전체 → S-13) → 새로 온 피드백(→ S-16). 빈 화면은 정기권 결제 후 일정 대기 상태(6장 표: “트레이너가 일정을 입력하면 알려 드려요”). 수강 중인 트레이너가 없는 홈은 S-05(이번 범위 밖).
 - **S-14**: 상태 배지(미제출/제출됨, 마감 임박) → 숙제 제목·트레이너·레슨 회차·마감일 → 예시 영상(있을 때) → 설명 → 내 제출 기록(→ S-16) → 하단 고정 [제출하기 → S-15]. 권한 없음은 HW-12(숙제를 받은 학생·트레이너·운영자만).
-- **C-02**: 글자 로고 “vocals”(로고 파일이 없어 글자로) + 한 줄 소개 → 아래쪽 카카오 · Apple(iOS만) · Google 버튼. 로딩은 누른 버튼에 스피너, 오류는 버튼 위 빨간 안내.
-- **C-03**: 인증 창(포트원)은 그리지 않았다. 인증 전 안내([본인인증하기]), 결과 확인 중, 오류([다시 인증하기]), 만 19세 미만(AUTH-03, [처음으로] → C-02).
+- **C-02**: 글자 로고 “vocals”(로고 파일이 없어 글자로) + 한 줄 소개 → 아래쪽 카카오 · Apple(iOS만) · Google 버튼. 버튼 아래 “시작하면 이용약관과 개인정보 처리방침에 동의하게 돼요.”(두 낱말은 링크, PM 결정 2026-11-22. 문구는 스토어 제출 전 법률 확인 예정). 로딩은 누른 버튼에 스피너, 오류는 버튼 위 빨간 안내.
+- **C-03**: 인증 창(포트원)은 그리지 않았다. 인증 전 안내([본인인증하기]), 결과 확인 중, 오류([다시 인증하기]), 만 19세 미만(AUTH-03, [처음으로] → C-02), 이미 가입한 계정(PM 결정 2026-11-22: 가입 수단을 알려 준다. “카카오로 가입한 계정이 있어요” + [카카오로 로그인] + [처음으로]. Apple·Google도 같은 모양에 그 버튼).
 - **C-04**: “학생” / “트레이너로 가입 신청” ChoiceCard 둘. 고르기 전 [다음] disabled. 학생 → C-05, 트레이너 → T-01.
-- **C-05**: 프로필 사진(96 원, 카메라 배지) + 닉네임 TextField(도움말 “단체 채팅방에서는 닉네임과 프로필 사진만 보여요.”) → [완료]. “나중에 내 정보에서 고칠 수 있어요.”
+- **C-05**: 프로필 사진(96 원, 카메라 배지) + 닉네임 TextField(도움말 “단체 채팅방에서는 닉네임과 프로필 사진만 보여요.”) → [완료]. “나중에 내 정보에서 고칠 수 있어요.” 닉네임은 2~12자(중복 허용), 벗어나면 오류 “닉네임은 2~12자로 입력해 주세요.”. 사진은 선택이고 없으면 기본 이미지.
 - **S-05**: 학생 탭바(홈). 트레이너 찾기 카드([트레이너 찾기] → S-20) + 링크 붙여 넣기 카드(TextField + [링크 열기] → S-01). 링크 확인 중, 링크 오류, 화면 오류.
-- **S-20**: 학생 탭바(찾기). 제목 → FilterChip 줄(지역·장르·가격대) → 결과 수 + SortSelect(후기 많은 순 기본) → TrainerListItem 목록(→ S-01). 시트 네 개(지역: 시·도 / 시·군·구 두 칸, 장르: 칩 여러 개, 가격대: 라디오, 정렬: 라디오). 빈 화면 두 가지(조건에 맞는 트레이너 없음 + [필터 초기화], 등록된 트레이너 없음).
+- **S-20**: 학생 탭바(찾기). 제목 → FilterChip 줄(지역·장르·가격대) → 결과 수 + SortSelect(후기 많은 순 기본) → TrainerListItem 목록(→ S-01). 시트 네 개(지역: 시·도 / 시·군·구 두 칸, 장르: 칩 여러 개, 가격대: 라디오 — 전체 · 3만 원 미만 · 3만~5만 원 · 5만~7만 원 · 7만 원 이상(1회당 가격, PM 결정 2026-11-22), 정렬: 라디오). 빈 화면 두 가지(조건에 맞는 트레이너 없음 + [필터 초기화], 등록된 트레이너 없음).
 - **S-22**: 앱바 “후기”, “○○ 트레이너 후기 n개 · 최신순” → ReviewCard 목록. 다른 사람 후기 메뉴 → 신고하기 → 신고 시트(이유 입력, `reports.reason` 필수). 내 후기 메뉴 → 고치기(S-23) · 지우기.
 - **S-13**: 학생 탭바(레슨). 제목 “레슨” → SegmentedControl 숙제 / 일정(숙제 선택) → 트레이너 칩(전체·트레이너 이름) → 미제출(마감 지남 → 마감 임박 → 마감 가까운 순) / 제출됨 두 섹션. 숙제를 누르면 S-14.
 - 하단 탭은 학생 홈 · 찾기 · 레슨 · 채팅 · 내 정보로 모든 학생 탭 화면이 같다(#49 S-04와도 같음).
@@ -212,19 +212,18 @@ React Native에서는 iOS `shadowColor/Offset/Opacity/Radius`, Android `elevatio
 - **safe area**: 아트보드에는 상태 표시줄·홈 인디케이터를 그리지 않았다. 앱바·탭바·하단 고정 영역에 safe area를 더한다.
 - **바텀 시트**: 250ms 아래에서 위로 밀기 + 뒤 바탕 페이드. 아래로 끌기·바탕 누르기·뒤로 가기로 닫고, 열리면 포커스를 시트 제목으로 옮긴다. 필터 시트는 [적용]을 눌러야 목록이 바뀌고, 정렬 시트는 고르면 바로 닫히고 다시 불러온다.
 - **S-20 필터**: 칩 줄과 결과 수 줄은 스크롤해도 위에 붙여 둔다(sticky). 필터·정렬을 바꾸면 목록을 맨 위로 올린다.
+- **가격대 경계**: 구간은 아래 값을 포함하고 위 값을 뺀다(3만~5만 원 = 30,000원 이상 50,000원 미만). 경계는 디자인이 정한 해석이라, 다르면 알려 달라.
 - **로그인 버튼 로고**: 카카오·Apple·Google 공식 로고 파일을 각 회사 가이드대로 넣는다. 디자인에는 자리만 있다.
 - **S-05 링크 붙여 넣기**: 붙여 넣은 링크가 트레이너 프로필 링크(TRN-02)인지 앱이 확인하고, 맞으면 S-01을 연다. 링크 형식은 Airbridge 설정(개발)을 따른다.
 - **이름**: 학생은 닉네임만, 트레이너는 프로필 이름. 아트보드의 이름·가격·장소·날짜는 모두 예시(더미)다.
 
 ## 6. 결정 필요
 
-#49의 결정 필요 1~5는 결정됐다(`docs/decisions.md` 2026-11-22 “화면 표시 기준”). #54에서 새로 생긴 것:
+없음. #49의 1~5와 #54의 1~8은 결정됐다(`docs/decisions.md` 2026-11-22). #54 결정 요약:
 
-1. **가격대 필터 구간** — MKT-02는 기준(가장 싼 1회당 가격)만 있고 구간이 없다. 아트보드에는 “[구간 n — 결정 필요]”로 비워 두었다. 추천: 4개 구간(1회 3만 원 미만, 3만~5만 원, 5만~7만 원, 7만 원 이상)에 '전체'. 되돌릴 수 있음: 예. 막히는 작업: S-20 가격대 시트 문구·쿼리.
-2. **지역 필터를 몇 개 고르나** — 추천: 시·군·구 하나만, 시·도 '전체'도 고를 수 있다(아트보드 그대로). 되돌릴 수 있음: 예.
-3. **장르를 여러 개 고르면** — 추천: 하나라도 맞으면 보여 준다(OR). 되돌릴 수 있음: 예.
-4. **가입 단계 순서** — `docs/screens.md`는 C-04가 언제 나오는지 순서를 적지 않았다. 추천: C-02 → C-03 → C-04 → C-05(트레이너는 C-04 → T-01, T-01은 “본인인증(C-03) 뒤”). 되돌릴 수 있음: 예.
-5. **이미 가입한 사람이 다른 소셜 계정으로 본인인증했을 때** — 연계정보로 중복 가입을 막지만(`user_account_records`) 그때 무엇을 보여 줄지 없다. 추천: “이미 가입한 계정이 있어요” 안내 + [처음으로]. 어느 로그인 수단으로 가입했는지 알려 줄지는 개인정보 공개 범위라 PM. 되돌릴 수 있음: 예. 막히는 작업: C-03 뒤 안내 아트보드(결정 뒤 추가).
-6. **약관·개인정보 처리방침 동의를 어디서 받나** — 가입 화면(C-02~C-05)에 동의 단계가 없다(법). 추천: C-03 앞에 동의 화면을 두거나 C-02 버튼 아래에 “시작하면 약관과 개인정보 처리방침에 동의하게 돼요” + 링크. 화면을 더하는 안은 범위 변경. 되돌릴 수 있음: 예. 막히는 작업: 스토어 제출 전 가입 흐름.
-7. **닉네임 규칙과 프로필 사진 필수 여부** — AUTH-06은 “가진다”만 정했다. 추천: 닉네임 2~12자, 중복 허용(채팅방에서 사진과 함께 보임), 사진은 선택(없으면 기본 이미지). 되돌릴 수 있음: 예. 막히는 작업: C-05 오류 문구.
-8. **후기 신고 이유** — `reports.reason`은 필수 글이다. 추천: 지금처럼 직접 입력만, 신고가 쌓이면 선택지 추가. 되돌릴 수 있음: 예.
+- 가격대 구간: 1회 3만 원 미만 / 3만~5만 원 / 5만~7만 원 / 7만 원 이상 + 전체 (PM)
+- 지역 필터는 시·군·구 하나, 시·도 '전체' 허용. 장르는 여러 개를 고르면 하나라도 맞으면(OR) (팀장)
+- 가입 순서: C-02 → C-03 → C-04 → C-05, 트레이너는 C-04 → T-01 (팀장)
+- 이미 가입한 사람이 다시 본인인증하면 가입 수단을 알려 주고 그 로그인으로 가는 버튼을 둔다 (PM)
+- 약관·개인정보 처리방침: C-02 버튼 아래 안내 문구와 링크. 스토어 제출 전 법률 확인 (PM)
+- 닉네임 2~12자·중복 허용, 프로필 사진은 선택. 후기 신고 이유는 직접 입력만 (팀장)
