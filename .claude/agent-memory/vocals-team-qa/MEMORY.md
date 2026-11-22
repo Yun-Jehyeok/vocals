@@ -27,3 +27,4 @@
 - beforeAll(fixture)이 실패하면 vitest는 그 파일 테스트를 failed가 아니라 skipped로 센다. 개발 전 결과는 "failed + skipped / 전체"로 적는다(#41).
 - 쓴 사람 컬럼이 없는 테이블(review_replies)의 "그 사람이 아니면 서버 insert도 실패" 조건은 service_role에 auth.uid()가 없어 DB가 판정할 수 없다. 테스트로 쓰지 않고 기획에 묻는다(#41).
 - 기존 테이블 쓰기를 새 상태(이용 제한 등)로 막는 조건은 허용 짝을 "같은 시도 + 그 상태만 푼 setup"(liftG)으로 둔다. 다른 사람으로 짝을 두면 거부 원인이 제한인지 가리지 못한다(#45).
+- 하네스 PR 판정: main 훅과 PR 훅에 같은 명령을 표준 입력 JSON으로 넣어 비교하고, main의 훅 테스트 파일을 PR 훅에 그대로 돌린다. 훅 우회 명령을 여러 줄 heredoc으로 넘기면 QA 세션의 훅에 막히므로 케이스는 Write로 /tmp 파일에 쓴다(#48).
