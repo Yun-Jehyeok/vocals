@@ -3,7 +3,8 @@
 // 전역(메인 세션 포함): .env 수정 금지, 기존 마이그레이션(main에 이미 있는 supabase/migrations/*) 수정·삭제 금지.
 // 역할별(서브에이전트에서만, 메인 세션=팀장은 역할 차단 없음):
 //   developer  docs/, 인수 테스트·판정 헬퍼(scripts/acceptance-guard.ts의 PROTECTED_PATHS) 수정 금지
-//   qa         테스트 파일, 요구사항 추적 기준선, QA 메모리(.claude/agent-memory/…qa/) 밖 수정 금지
+//   qa         테스트 파일, 테스트 폴더(supabase/tests/, tests/, apps/mobile/tests/acceptance/),
+//              요구사항 추적 기준선, QA 메모리(.claude/agent-memory/…qa/) 밖 수정 금지
 //   planner    docs/와 팀 규칙 문서(CLAUDE.md, .claude/rules/, 플러그인 md) 밖 수정 금지
 //   designer   코드 경로(apps/, packages/, supabase/, scripts/) 수정 금지
 // 규칙은 vocals 레포(루트에 plugins/vocals-team이 있는 git 저장소, worktree 포함) 안의 경로에만 적용한다.
@@ -27,6 +28,7 @@ export function roleOf(agentType) {
 /** scripts/acceptance-guard.ts를 못 읽을 때 쓰는 사본. 단위 테스트가 원본과 같은지 확인한다. */
 export const FALLBACK_PROTECTED_PATHS = [
   "supabase/tests/acceptance/",
+  "apps/mobile/tests/acceptance/",
   "tests/acceptance/",
   "supabase/tests/helpers/db.ts",
   "supabase/tests/helpers/rls-matrix.ts",
@@ -227,6 +229,8 @@ const ALLOWED = {
     TEST_FILE.test(file) ||
     touches(file, "supabase/tests/", "write") ||
     touches(file, "tests/", "write") ||
+    // 앱 인수 테스트 폴더의 테스트 대역·헬퍼(테스트 파일이 아닌 것, #56)
+    touches(file, "apps/mobile/tests/acceptance/", "write") ||
     file === "scripts/req-trace-baseline.txt" ||
     QA_MEMORY.test(file),
   planner: (file) =>

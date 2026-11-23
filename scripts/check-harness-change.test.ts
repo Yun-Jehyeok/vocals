@@ -79,6 +79,8 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
       "packages/shared/vitest.config.ts",
       "apps/admin/vitest.config.mts",
       "vitest.workspace.ts",
+      "apps/mobile/jest.config.js",
+      "apps/admin/jest.config.ts",
     ]) {
       expect(isHarnessPath(file)).toBe(true);
     }
@@ -90,6 +92,7 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
       "supabase/seed.sql",
       "plugins/vocals-team/agents/qa.md",
       "packages/shared/src/vitest.config.helper.ts",
+      "apps/mobile/tests/jest.config.helper.ts",
     ]) {
       expect(isHarnessPath(file)).toBe(false);
     }
@@ -160,5 +163,33 @@ describe("테스트 범위 설정 (이슈 #17 2단계 후속)", () => {
     const result = check([]);
     expect(result.status).toBe("fail");
     expect(result.files).toEqual(["packages/shared/vitest.config.ts"]);
+  });
+});
+
+describe("앱 테스트 실행기 설정 (이슈 #56)", () => {
+  it("새로 만든 jest 설정도 하네스 변경으로 보고 라벨이 없으면 실패한다", () => {
+    commit("chore: 앱 테스트 범위", {
+      "apps/mobile/jest.config.js": "module.exports = { testMatch: ['<rootDir>/a.test.tsx'] };",
+    });
+    const result = check([]);
+    expect(result.status).toBe("fail");
+    expect(result.files).toEqual(["apps/mobile/jest.config.js"]);
+  });
+
+  it("package.json의 jest 필드가 바뀌면 하네스로 본다", () => {
+    const withJest = (jest: unknown) =>
+      JSON.stringify({ name: "m", scripts: { test: "jest --ci" }, jest }, null, 2);
+    commit("chore: 앱", { "apps/mobile/package.json": withJest({ preset: "jest-expo" }) });
+    git("checkout", "-q", "main");
+    git("merge", "-q", "work");
+    git("checkout", "-q", "work");
+    expect(check([]).status).toBe("pass");
+    commit("chore: 앱 테스트 범위 줄임", {
+      "apps/mobile/package.json": withJest({
+        preset: "jest-expo",
+        testPathIgnorePatterns: ["acceptance"],
+      }),
+    });
+    expect(check([]).files).toEqual(["apps/mobile/package.json"]);
   });
 });

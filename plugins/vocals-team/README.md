@@ -30,13 +30,13 @@
 
 경로 규칙(`lib/rules.mjs`, vocals 레포와 그 worktree 안에서만). 경로는 심볼릭 링크를 풀고 대소문자를 무시해 비교한다. `agent_type`도 대소문자를 무시한다.
 
-| 누구      | 막는 경로                                                                                                                                  |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 모든 세션 | `.env*`(`.env.example` 제외), main에 이미 있는 `supabase/migrations/*`                                                                     |
-| developer | `docs/`, 인수 테스트·판정 헬퍼(`scripts/acceptance-guard.ts`의 `PROTECTED_PATHS`를 그때그때 읽어 씀)                                       |
-| qa        | 테스트 파일(`*.test.ts` 등, `supabase/tests/`, `tests/`), `scripts/req-trace-baseline.txt`, QA 메모리(`.claude/agent-memory/…qa/`) 밖 전부 |
-| planner   | `docs/`, `CLAUDE.md`, `.claude/rules/`, 이 플러그인의 `.md` 밖 전부                                                                        |
-| designer  | `apps/`, `packages/`, `supabase/`, `scripts/`                                                                                              |
+| 누구      | 막는 경로                                                                                                                                                                   |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 모든 세션 | `.env*`(`.env.example` 제외), main에 이미 있는 `supabase/migrations/*`                                                                                                      |
+| developer | `docs/`, 인수 테스트·판정 헬퍼(`scripts/acceptance-guard.ts`의 `PROTECTED_PATHS`를 그때그때 읽어 씀)                                                                        |
+| qa        | 테스트 파일(`*.test.ts` 등, `supabase/tests/`, `tests/`, `apps/mobile/tests/acceptance/`), `scripts/req-trace-baseline.txt`, QA 메모리(`.claude/agent-memory/…qa/`) 밖 전부 |
+| planner   | `docs/`, `CLAUDE.md`, `.claude/rules/`, 이 플러그인의 `.md` 밖 전부                                                                                                         |
+| designer  | `apps/`, `packages/`, `supabase/`, `scripts/`                                                                                                                               |
 
 Bash 해석(`lib/shell.mjs`):
 
