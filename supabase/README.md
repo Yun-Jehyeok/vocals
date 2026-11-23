@@ -122,7 +122,7 @@ supabase migration list --remote                       # Local과 Remote 칸이 
 
 - `supabase db reset --remote`(2.x는 `--linked`): 원격 DB를 지우고 처음부터 다시 만든다.
 - 운영 프로젝트(생기면)나 다른 프로젝트에 `link`. 올리기 전에 연결된 ref를 확인한다.
-- 원격에 seed 넣기: `db push --include-seed`, `supabase seed`, 대시보드 SQL 편집기에 `seed.sql` 붙여넣기. (`config.toml`에서 seed를 꺼 두었다)
+- 원격에 seed 넣기: `db push --include-seed`, `supabase seed`, 대시보드 SQL 편집기에 `seed.sql` 붙여넣기. `config.toml`의 `[db.seed] enabled = false`는 이를 막지 못한다(CLI 3.x의 `--include-seed`는 이 값을 무시한다). 이 플래그·명령을 쓰지 않는 것만이 막는 방법이다.
 - `supabase config push`: `config.toml`의 최소 설정으로 원격의 Auth 등 설정을 덮어쓴다.
 - 팀장과 정하지 않은 `supabase migration repair`, `db pull`, `db push --include-all`: 원격의 마이그레이션 이력이나 로컬 파일을 바꾼다.
 - 대시보드(테이블 편집기·SQL 편집기)에서 스키마를 직접 바꾸기. 스키마는 `migrations/`의 새 파일로만 바꾼다.

@@ -12,5 +12,7 @@ project_id = "vocals"
 major_version = 17
 
 [db.seed]
-# seed.sql은 로컬 더미 데이터다. `db push --include-seed`로도 원격에 들어가지 않게 끈다.
+# seed.sql은 로컬 더미 데이터다. 플래그 없이 도는 seed를 끈다.
+# 이 설정은 원격 seed를 막지 못한다. CLI 3.x의 `db push --include-seed`는 이 값을 무시하고 seed를 넣는다.
+# 원격에 seed를 넣지 않는 것은 supabase/README.md "하지 말 것"으로 지킨다.
 enabled = false
