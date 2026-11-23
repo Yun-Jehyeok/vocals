@@ -1,1 +1,5 @@
 {"ts":"2026-11-23T03:03:31.639Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"supabase/tests/acceptance/"}
+{"ts":"2026-11-23T03:20:53.944Z","session":"673715e8","event":"block","rule":"qa.scope","role":"qa","tool":"Write","target":"apps/mobile/tests/acceptance/56-doubles.ts"}
+{"ts":"2026-11-23T03:25:34.616Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"supabase/tests/acceptance/"}
+{"ts":"2026-11-23T03:26:52.335Z","session":"673715e8","event":"block","rule":"supabase.db-push","role":"developer","tool":"Bash","target":null}
+{"ts":"2026-11-23T07:39:24.872Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"supabase/tests/acceptance/"}
