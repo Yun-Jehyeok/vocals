@@ -27,3 +27,6 @@
 - 훅 허용 목록에 명령 이름(gh 등)을 통째로 넣지 않는다. 하위 명령·플래그 단위로 넣고, 인자나 그 일부를 돌려주는 함수(strip·split 등)는 "글 자리"로 보지 않는다(#48 QA 반려 3차).
 - 글 자리 목록에는 어떤 라이브러리로 불러도 결과가 None·참거짓·숫자인 함수만 넣는다. `dump`처럼 라이브러리마다 동작이 다른 이름은 넣지 않는다(#48 QA 반려 4차, `yaml.dump`).
 - 개발 역할에서 Bash 명령 하나에 `docs/` 글자와 python heredoc 쓰기가 같이 있으면 훅이 막는다. 스크립트는 /tmp 파일로 따로 써서 실행하고, 커밋 메시지는 `git commit -F - <<'EOF'`로 쓴다(#52).
+- 앱 테스트는 RNTL 14라 `render`·`renderRouter`가 비동기다. `await` 없이 부르면 "`render` function has not been called"로 실패한다(#56).
+- 이 환경은 프록시가 api.expo.dev를 막아 `expo install --check`가 실패한다. `EXPO_OFFLINE=1`로 돌리고, 버전은 `npm pack expo@<버전>`의 `bundledNativeModules.json`에서 읽는다(#56).
+- 개발의 스모크·단위 테스트 이름에 요구사항 ID를 넣으면 req-trace가 기준선에서 그 ID를 지우라고 실패한다. ID 추적은 QA 인수 테스트에 맡긴다(#56).

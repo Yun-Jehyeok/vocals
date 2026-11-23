@@ -15,7 +15,7 @@ PM(사람)이 결정하고, 팀장(메인 세션)이 일을 나누고, 역할 �
 ## 작업 흐름
 
 1. 기획: 완료 조건을 정한다.
-2. QA: 완료 조건을 인수 테스트로 쓴다(`supabase/tests/acceptance/<이슈번호>-*.test.ts`). 커밋에 트레일러 `Acceptance: qa`.
+2. QA: 완료 조건을 인수 테스트로 쓴다(DB는 `supabase/tests/acceptance/<이슈번호>-*.test.ts`, 앱은 `apps/mobile/tests/acceptance/<이슈번호>-*.test.tsx`). 커밋에 트레일러 `Acceptance: qa`.
 3. 디자인·개발: 인수 테스트를 통과시키는 것이 완료 기준이다. 인수 테스트는 고치지 않는다. 틀렸다고 보면 `[질문] 받는 역할: QA`.
 4. QA: 실행 결과를 근거로 판정한다. 근거 없이 "통과"라고 쓰지 않는다.
 
