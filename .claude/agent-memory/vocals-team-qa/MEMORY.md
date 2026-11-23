@@ -32,3 +32,7 @@
 - 허용 목록 훅을 판정할 때는 목록 안 명령의 위험한 하위 명령(gh alias·download·clone), 인자를 그대로 돌려주는 함수(str.strip·split·encode), 도구가 읽는 환경 변수(vitest UPDATE_SNAPSHOT)를 먼저 우회 시도한다(#48 3차).
 - 글 자리(SINK) 허용 목록을 판정할 때는 함수 이름마다 "스트림·대상 없이 부르면 인자를 돌려주는가"를 확인한다(yaml.dump는 글을 돌려주고 json.dump는 None). 마지막 판정에서는 main에서도 허용되던 구멍(gh api PUT contents 등)을 반려 사유와 분리해 참고로만 적는다(#48 4차).
 - 훅 PR 최종 판정은 마지막 수정 diff가 말한 범위(줄 수)와 같은지 `git show --stat`으로 먼저 확인하고, 우회 탐색은 그 diff 범위만 한다(#48 최종).
+- 앱 인수 테스트의 앱 재시작: `jest.resetModules()` 뒤 react·react-native·expo-router(하위 경로 포함)·safe-area·screens·expo-linking·expo-constants·expo-modules-core를 `jest.doMock(name, () => 이전 인스턴스)`로 고정하고 정적으로 가져온 `renderRouter`로 다시 렌더한다. 테스트 안에서 testing-library를 다시 require하면 "Hooks cannot be defined inside tests"가 난다(#56).
+- RNTL 14 `fireEvent.press`는 핸들러가 돌려준 Promise까지 기다린다. 대역이 붙잡아 둔 로딩 상태는 `void press` → 마이크로태스크 20번 → `act`로 흘려보낸다. 열린 `act` 안에서 `setTimeout`을 기다리면 멈춘다(#56).
+- jest-expo에서 `AppState.addEventListener`는 이미 jest.fn이다. spyOn한 뒤 원래 함수를 부르면 무한 재귀가 된다(#56).
+- QA 훅은 `*.test.*`만 허용했다(0.7.0 이전). 테스트 헬퍼·대역은 테스트 파일 안에 두고, jest.mock 팩토리가 부르는 함수 이름은 `mock`으로 시작, 대역 상태는 globalThis에 둔다(#56).
