@@ -1,0 +1,9 @@
+{
+  "extends": ["expo/tsconfig.base", "../../tsconfig.base.json"],
+  "compilerOptions": {
+    "jsx": "react-native",
+    "types": ["jest", "react-native"],
+    "noEmit": true
+  },
+  "include": ["app", "src", "tests", "expo-env.d.ts"]
+}
