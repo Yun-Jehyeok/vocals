@@ -65,7 +65,23 @@ pnpm --filter @vocals/mobile start --tunnel
 
 - "Project is incompatible with this version of Expo Go": 휴대폰의 Expo Go를 최신으로 업데이트한다(SDK 58).
 - QR을 찍어도 연결되지 않음: `--tunnel`로 다시 켠다.
-- "설정 값이 없어요" 화면(로그인 기능이 들어간 뒤): `apps/mobile/.env`의 두 값을 확인하고 서버를 껐다 켠다.
+- "설정 값이 없어요" 화면: `apps/mobile/.env`의 두 값을 확인하고 서버를 `--clear`를 붙여 껐다 켠다.
+- 카카오 로그인 뒤 브라우저에 머물고 앱으로 돌아오지 않음: 4단계 Redirect URLs(`exp://**`)를 확인한다.
+- 로그인 뒤 빨간 안내 "로그인하지 못했어요": 인터넷 연결, `.env` 값(테스트 프로젝트 것인지), Supabase 대시보드의 카카오 공급자 설정을 확인한다.
+
+## 코드 구조
+
+| 위치             | 내용                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| `app/`           | 화면 주소. `index`(첫 화면 분기), `auth/callback`(로그인 뒤 돌아오는 주소), `tab-preview` |
+| `src/theme`      | 디자인 토큰(`docs/design.md` 2장 이름을 camelCase로)                                      |
+| `src/components` | Button, SocialLoginButton, StateView, TabBar, Icon                                        |
+| `src/auth`       | Supabase 클라이언트, 카카오 로그인, 암호화 세션 저장소, 로그인 상태(AuthProvider)         |
+| `src/screens`    | C-02 로그인, "가입 이어서 하기" 자리 표시, 설정 오류, 탭 미리보기                         |
+| `src/navigation` | 역할별 하단 탭 이름·순서·아이콘(`docs/screens.md` 1장)                                    |
+
+- 첫 화면: 세션 확인 중에는 스플래시 → 로그인 안 됨이면 C-02, 됨이면 "가입 이어서 하기"(결정 2). 탭 미리보기는 개발 모드에서만.
+- 세션: 암호화 키(32바이트)는 `expo-secure-store`, AES-256-GCM 암호문은 AsyncStorage(결정 6). 토큰 자동 갱신은 앱이 앞에 있을 때만.
 
 ## 테스트
 
@@ -107,4 +123,5 @@ it("첫 화면", async () => {
 - 외부 연결은 테스트 안에서 라이브러리 경계를 `jest.mock`으로 대역을 둔다(제품 코드에는 mock이 없다). 앱이 쓰는 경계 라이브러리:
   - `@supabase/supabase-js`(`createClient`, `auth.*`)
   - `expo-web-browser`(`openAuthSessionAsync` 등), `expo-auth-session`(`makeRedirectUri`), `expo-linking`
-  - `expo-secure-store`, `@react-native-async-storage/async-storage`(공식 대역: `@react-native-async-storage/async-storage/jest/async-storage-mock`)
+  - `expo-secure-store`, `@react-native-async-storage/async-storage`(공식 대역: `@react-native-async-storage/async-storage/jest/async-storage-mock`. jest에는 네이티브 모듈이 없어 앱을 렌더하는 테스트는 이 대역이 필요하다)
+- `expo-crypto`·`expo-font`·`expo-splash-screen` 같은 Expo 네이티브 모듈은 jest-expo가 `expo-modules-core`를 바꿔 끼워 대역을 준다. `jest.resetModules()`로 앱을 다시 읽을 때 `jest.requireActual("expo-modules-core")`를 다시 넣으면 이 대역이 빠져 "Cannot find native module 'ExpoCrypto'"가 난다.
