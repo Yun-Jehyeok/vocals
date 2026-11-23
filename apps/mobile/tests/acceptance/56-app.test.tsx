@@ -359,10 +359,16 @@ const SHARED_LIBRARIES = [
   "expo-constants",
   "expo-modules-core",
 ];
+// jest-expo 프리셋이 jest.doMock으로 대역(네이티브 모듈 대역)을 넣어 둔 라이브러리. 실제 모듈이 아니라 그 대역 인스턴스를 공유해야 한다.
+// (실제 expo-modules-core를 고정하면 프리셋 대역이 빠져 expo-crypto 등이 "Cannot find native module"로 실패한다, #56 판정 전 발견)
+const MOCKED_BY_PRESET = new Set(["expo-modules-core"]);
 const shared = new Map<string, unknown>();
 for (const name of SHARED_LIBRARIES) {
   try {
-    shared.set(name, jest.requireActual(name));
+    shared.set(
+      name,
+      MOCKED_BY_PRESET.has(name) ? jest.requireMock(name) : jest.requireActual(name),
+    );
   } catch {
     // 설치되지 않은 하위 경로는 건너뛴다
   }
