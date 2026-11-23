@@ -32,3 +32,6 @@
 - 허용 목록 훅을 판정할 때는 목록 안 명령의 위험한 하위 명령(gh alias·download·clone), 인자를 그대로 돌려주는 함수(str.strip·split·encode), 도구가 읽는 환경 변수(vitest UPDATE_SNAPSHOT)를 먼저 우회 시도한다(#48 3차).
 - 글 자리(SINK) 허용 목록을 판정할 때는 함수 이름마다 "스트림·대상 없이 부르면 인자를 돌려주는가"를 확인한다(yaml.dump는 글을 돌려주고 json.dump는 None). 마지막 판정에서는 main에서도 허용되던 구멍(gh api PUT contents 등)을 반려 사유와 분리해 참고로만 적는다(#48 4차).
 - 훅 PR 최종 판정은 마지막 수정 diff가 말한 범위(줄 수)와 같은지 `git show --stat`으로 먼저 확인하고, 우회 탐색은 그 diff 범위만 한다(#48 최종).
+- 역할·기본 권한 검증은 `/usr/lib/postgresql/16/bin`에 임시 클러스터를 만들어 한다. root로는 initdb·pg_ctl이 안 되니 `runuser -u postgres`로 돌린다. superuser는 `supabase_admin`, `postgres`는 superuser가 아니게 만들고, 기본 권한은 `alter default privileges for role postgres`로 건다(#59).
+- 기본 권한을 바꾸는 변경은 /tmp 복사본에서 shim의 기본 권한 줄을 빼고 인수 테스트 전체를 돌린다. 대조군(그 마이그레이션 제외)이 실패하는지도 함께 본다(#59).
+- 설정 파일의 "안전장치" 주석은 외부 도구 문서로 확인한다. 예: Supabase CLI v3에서 `--include-seed`가 `[db.seed] enabled = false`를 무시한다(#59).
