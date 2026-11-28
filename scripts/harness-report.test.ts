@@ -491,6 +491,10 @@ describe("harness-report: 이슈별 지표 (이슈 #61)", () => {
       prIssueRefs({ title: "fix: x", body: "- 이슈: #48 (근거: #17, #23)\nCloses #49" }),
     ).toEqual([48, 49]);
     expect(prIssueRefs({ title: "x", body: "이슈 #49. 관련 #12" })).toEqual([49]);
+    expect(prIssueRefs({ title: "x", body: "관련 이슈: #10, #11" })).toEqual([10]);
+    // 문장 속 `이슈 #번호`는 근거 언급이라 연결이 아니다(실제 PR #14·#22의 오연결)
+    expect(prIssueRefs({ title: "x", body: "- 표기 (개발 질문, 이슈 #17)" })).toEqual([]);
+    expect(prIssueRefs({ title: "x", body: "- 출처: PR #1, 이슈 #11·#15 본문" })).toEqual([]);
     expect(prIssueRefs({ title: "x", body: "`이슈: #5`는 예시" })).toEqual([]);
   });
 

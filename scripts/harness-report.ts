@@ -262,14 +262,17 @@ export function fetchComments(gh: Gh, since: Date, prs?: PrInfo[]): Comment[] | 
 // ---------- 이슈 연결 ----------
 
 /**
- * PR이 가리키는 이슈 번호 후보: 제목의 모든 `#번호`, 본문의 `이슈: #번호`·`이슈 #번호`(PR 템플릿)와
- * `Closes|Fixes|Resolves #번호`. 본문의 다른 `#번호`(근거·관련 PR)는 연결로 보지 않는다.
+ * PR이 가리키는 이슈 번호 후보: 제목의 모든 `#번호`, 본문의 `이슈: #번호`(PR 템플릿, 콜론 뒤 첫 번호),
+ * 줄 맨 앞의 `이슈 #번호`, `Closes|Fixes|Resolves #번호`. 문장 속 `이슈 #번호`와 다른 `#번호`(근거·관련 PR)는
+ * 연결로 보지 않는다.
  */
 export function prIssueRefs(pr: Pick<PrInfo, "title" | "body">): number[] {
   const refs = new Set<number>();
   for (const match of pr.title.matchAll(/#(\d+)/g)) refs.add(Number(match[1]));
   const body = stripCode(pr.body);
-  for (const match of body.matchAll(/이슈\s*:?\s*#(\d+)/g)) refs.add(Number(match[1]));
+  for (const match of body.matchAll(/이슈\s*:\s*#(\d+)|^[ \t]*(?:[-*][ \t]*)?이슈[ \t]+#(\d+)/gm)) {
+    refs.add(Number(match[1] ?? match[2]));
+  }
   for (const match of body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
     refs.add(Number(match[1]));
   }
