@@ -40,3 +40,6 @@
 - Expo SDK 58은 URL·URLSearchParams 표준 구현을 전역에 넣는다. `react-native-url-polyfill`은 필요 없다(#56).
 - PR이 main과 충돌하면(`mergeable_state: dirty`) GitHub가 pull_request CI를 돌리지 않고 pull_request_target(Harness guard)만 돈다. push 뒤 CI가 안 보이면 mergeable_state부터 본다(#56).
 - CI는 로컬보다 느려 jest 기본 5초 한도를 넘는 렌더 테스트가 있다. 앱 렌더 테스트는 파일 안에 `jest.setTimeout(30_000)`을 둔다(#56).
+- worktree에서 일해도 훅 로그의 브랜치는 세션 cwd(메인 체크아웃)의 브랜치다(명령 안의 cd /tmp/wt-… 무관). 로그가 다른 브랜치 이름 파일에 섞일 수 있다(#61).
+- 트레일러 글자가 든 테스트·문서는 Bash heredoc(python)이 아니라 Edit·Write로 고친다. 테스트에서는 글자를 쪼개지 말고 상수 하나에 담아 Edit로 쓴다(#61).
+- 임시 vocals 모양 저장소(plugin.json 마커+docs/)는 개발 역할로 rm -rf가 막힌다. 실험 저장소에는 docs/를 만들지 않거나 마커 없이 만든다(#61).

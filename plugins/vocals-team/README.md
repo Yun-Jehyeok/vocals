@@ -24,6 +24,7 @@
 | 훅                    | 대상                                 | 막는 것                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | --------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `session-context.mjs` | SessionStart                         | 막지 않음. 팀장 컨텍스트에 30줄 이내 현황을 넣는다(아래)                                                                                                                                                                                                                                                                                                                                                                      |
+| `log-approval.mjs`    | PermissionRequest(모든 도구)         | 막지도 허용하지도 않음(결정 출력 없음). 승인 요청을 차단 로그 파일에 `approval.wait`로 남긴다(아래 "승인 요청 기록", #61)                                                                                                                                                                                                                                                                                                     |
 | `guard-files.mjs`     | Edit, Write, MultiEdit, NotebookEdit | 아래 경로 규칙                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `guard-bash.mjs`      | Bash                                 | 강제 push(`-f`·`-fu`·`+refspec`·`--mirror`), main으로 가는 push(`--all`, 브랜치가 main일 때 refspec 없는 push 포함), 원격 DB를 바꾸는 supabase CLI(`db push`, `db reset --linked/--db-url`, `migration repair`, `functions deploy`, `secrets set` 등)와 원격 `psql`, 파일을 쓰는 명령의 경로 규칙 위반, QA가 아닌 역할의 트레일러 위조. 데이터(PR 본문·커밋 메시지·검색어)의 글자와 검사·테스트 실행은 막지 않는다(아래, #48) |
 | `guard-mcp.mjs`       | `mcp__*__<위험 도구>`                | Supabase `create_project`, `pause_project`, `restore_project`, `create_branch`, `delete_branch`, `merge_branch`, `reset_branch`, `rebase_branch`, `apply_migration`, `execute_sql`, `deploy_edge_function`, `create_edge_function_secret`, `confirm_cost`, `run_notebook`, `create_notebook`, `delete_notebook`. 접두어가 달라도 막는다. Figma·GitHub의 같은 이름 도구는 허용                                                 |
@@ -59,20 +60,31 @@ Bash 해석(`lib/shell.mjs`):
 - 훅 단위 테스트: `scripts/plugin-hooks.test.ts`, `scripts/session-context.test.ts`, `scripts/hook-log.test.ts`(`pnpm test`). 규칙을 바꾸면 표에 줄을 더한다.
 - 차단 메시지의 "왜"는 대상에 맞춘다(예: QA가 문서 → 기획 담당, seed → 개발 담당, 하네스 → 팀장 라벨).
 - 로컬 `.claude/settings.json`의 PreToolUse 훅은 이 스크립트를 레포 경로(`$CLAUDE_PROJECT_DIR/plugins/vocals-team/hooks/`)에서 직접 부른다. 그래서 로컬은 항상 작업 트리의 최신 규칙을 쓴다. 플러그인 훅(마켓플레이스 캐시)과 둘 다 돌아도 판정이 같다.
-- 이 디렉터리를 바꾸는 PR은 `harness` 라벨이 있어야 CI를 통과한다(`scripts/check-harness-change.ts`).
+- 이 디렉터리를 바꾸는 PR은 `harness` 라벨이 있어야 CI를 통과한다(`scripts/check-harness-change.ts`). draft PR은 라벨이 없어도 "판정 보류" 경고로 두고 ready가 되면 강제한다(#61). draft 여부·라벨은 실행 시점의 PR 상태(API)로 정한다.
 - 훅이 클라우드 스레드에서 실제로 도는지는 플러그인을 켠 새 세션에서 QA가 실측한다(#17 2단계 검증).
 
 ## 차단 로그 (`lib/log.mjs`, 이슈 #17 6단계)
 
 - 훅이 막을 때마다(`lib/io.mjs`의 `block`) `<메인 체크아웃>/.claude/logs/<YYYY-MM-DD>-<세션 앞 8자>-<브랜치>.jsonl`에 한 줄을 더한다(#48). 날짜는 UTC, 세션은 훅 입력 `session_id`에서 `session_` 접두어와 영숫자가 아닌 글자를 뺀 앞 8자, 브랜치는 막힌 체크아웃(worktree·복사본이면 그곳)의 브랜치 이름에서 영숫자·`.`·`_`·`-` 밖의 글자를 `-`로 바꾼 것(`fix/48-x` → `fix-48-x`, 브랜치가 없으면 `detached`, 80자까지).
 - 이름 규칙의 이유: 같은 세션이 여러 브랜치(docs PR과 기능 PR)에서 막혀도 브랜치마다 파일이 달라, 두 PR이 같은 파일을 고쳐 merge 때 충돌하지 않는다. #48 이전 이름(`<날짜>-<세션>.jsonl`)의 파일은 그대로 두고 집계에도 쓴다.
-- 필드: `ts`, `session`, `event`(`block`), `rule`(규칙 id), `role`(`developer`·`qa`·`planner`·`designer`, 다른 에이전트는 `agent_type` 그대로, 메인 세션은 `main`), `tool`, `target`(저장소 기준 경로, MCP 도구 이름, 경로가 없는 명령 규칙은 `null`).
+- 필드: `ts`, `session`, `event`(`block`, 승인 요청은 `approval`), `rule`(규칙 id), `role`(`developer`·`qa`·`planner`·`designer`, 다른 에이전트는 `agent_type` 그대로, 메인 세션은 `main`), `tool`, `target`(저장소 기준 경로, MCP 도구 이름, 경로가 없는 명령 규칙은 `null`).
 - **명령 원문·파일 내용·도구 인자 값은 남기지 않는다.** 저장소 밖 절대 경로는 파일 이름만 남긴다.
 - 쓰는 곳: 세션 프로젝트(`CLAUDE_PROJECT_DIR`, 없으면 막힌 저장소)의 메인 체크아웃(`git rev-parse --git-common-dir`의 부모). 수동 worktree(`/tmp/wt-<이슈번호>`)나 /tmp 복사본에서 막혀도 메인 체크아웃에 남아, worktree를 지워도 기록이 사라지지 않는다(#48). `target`은 막힌 저장소 기준 경로다. vocals 저장소를 못 찾으면 남기지 않는다. 쓰기 실패는 무시한다(차단은 그대로).
 - 커밋: 브랜치 이름이 붙은 파일은 그 브랜치의 PR에만 커밋한다(`git add .claude/logs/*-<브랜치>.jsonl`, `git add -A`로 다른 브랜치 파일까지 담지 않는다). 그 브랜치를 worktree에서 작업했으면 팀장이 메인 체크아웃의 파일을 worktree 쪽에 이어 붙이고(`cat <메인>/.claude/logs/<파일> >> /tmp/wt-<이슈번호>/.claude/logs/<파일>`) 메인 체크아웃의 파일은 지운 뒤 worktree에서 커밋한다(남겨 두면 그 브랜치를 checkout·pull할 때 추적되지 않은 파일과 부딪친다).
 - 규칙 id는 `lib/log.mjs`의 `RULE_IDS`가 목록이다. 새 차단을 더하면 `block({ rule: "…" })`과 목록에 같이 더한다(`scripts/hook-log.test.ts`가 둘이 같은지 본다). id를 바꾸면 지난 로그와 집계가 끊긴다.
 - 클라우드는 세션이 끝나면 파일이 사라져서 팀장이 작업 PR에 커밋한다(PM 결정 2026-11-20, team-lead 스킬 6장). `.gitignore`에 넣지 않고, `check-harness-change`는 이 디렉터리를 하네스로 보지 않는다.
 - 집계: `pnpm harness:report`(`scripts/README.md`).
+
+### 승인 요청 기록 (`log-approval.mjs`, #61)
+
+- 승인 대기로 멈춘 횟수를 재려고, 사람의 승인을 기다리는 도구 호출을 같은 로그 파일에 한 줄씩 남긴다: `event: "approval"`, `rule: "approval.wait"`, `role`, `tool`(도구 이름), `target: null`. 명령 원문·`tool_input`·`permission_suggestions`·`mcp_server`는 남기지 않는다.
+- 이벤트는 Notification이 아니라 **PermissionRequest**다. Claude Code 훅 문서(https://code.claude.com/docs/en/hooks)의 근거:
+  - Notification 입력은 `message`·`title`·`notification_type`뿐이라 도구 이름이 없고, `permission_prompt`는 프롬프트가 약 6초 기다린 뒤에만 온다.
+  - PermissionRequest는 "Claude Code가 도구 사용 승인을 물으려 할 때" 돌고 `tool_name`·`tool_input`을 받는다. 프롬프트를 띄울 수 없는 세션(백그라운드 서브에이전트 등)에서도 돌고, 결정을 낸 훅이 없으면 그 호출은 거부된다(훅이 없을 때와 같다). matcher는 도구 이름이라 생략해 모든 도구에 건다.
+  - 결정 출력(`hookSpecificOutput.decision`)을 내지 않고 종료 코드 0으로 끝나므로 승인 흐름은 바뀌지 않는다. 종료 코드 2도 이 이벤트에서는 흐름을 바꾸지 않는다.
+- 차단 규칙이 아니라 `RULE_IDS`에 넣지 않는다(보고의 "한 번도 걸리지 않은 규칙"에 나오지 않는다). 집계는 보고의 "승인 대기" 절.
+- 로컬 `.claude/settings.json`에는 넣지 않는다(플러그인이 켜져 있어 두 번 남는다).
+- 클라우드 스레드에서 실제로 기록되는지는 플러그인을 켠 새 세션에서 QA가 실측한다.
 
 ## 세션 시작 현황 (`session-context.mjs`, 이슈 #17 3단계)
 

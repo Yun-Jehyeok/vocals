@@ -3,9 +3,12 @@
 // 하네스(훅, CI, 검사·센서, 보호 목록, 검사를 부르는 package.json scripts)를 바꾸면 차단과 검사가 함께 약해질 수 있다.
 // 개발이 하네스 작업도 하므로 훅으로 막지 않고, PR에 사람이 보고 붙인 라벨이 있는지만 본다.
 //   --labels a,b: PR 라벨(CI가 이벤트 페이로드에서 넘긴다). 없으면(로컬) 바뀐 하네스 파일을 경고로만 알린다.
+//   --draft true: draft PR(이슈 #61, PM 승인 2026-11-28 A안). 라벨이 없어도 실패 대신 "판정 보류" 경고로 두고
+//     GitHub 어노테이션·job 요약에 남긴다. ready 전환(ready_for_review)·ready 상태의 push·라벨 변경 때는 draft가 false라
+//     지금처럼 실패한다. "true" 밖의 값(빈 값 포함)은 ready로 본다(모르면 강제).
 //
-// 사용: node scripts/check-harness-change.ts [--base origin/main] [--head HEAD] [--strict] [--labels a,b]
-import { readFileSync } from "node:fs";
+// 사용: node scripts/check-harness-change.ts [--base origin/main] [--head HEAD] [--strict] [--labels a,b] [--draft true|false]
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BaseArgs } from "./git-base.ts";
@@ -52,6 +55,23 @@ export interface HarnessResult {
   status: "pass" | "fail" | "skip" | "warn";
   lines: string[];
   files: string[];
+  /** draft라 라벨 판정을 미뤘다(#61). CI에서 어노테이션으로 드러낸다 */
+  deferred?: boolean;
+}
+
+/** `--draft` 값. 정확히 "true"일 때만 draft(빈 값·오타·"TRUE"는 ready로 보고 강제한다) */
+export function parseDraft(value: string | undefined): boolean {
+  return value === "true";
+}
+
+/** 판정 보류 경고를 GitHub Actions 어노테이션으로 낸다. Actions 밖이면 아무것도 내지 않는다 */
+export function draftAnnotation(
+  result: HarnessResult,
+  env: Record<string, string | undefined>,
+): string[] {
+  if (!result.deferred || env.GITHUB_ACTIONS !== "true") return [];
+  const message = `draft라 판정 보류: 하네스 파일 ${result.files.length}개가 바뀌었고 ${HARNESS_LABEL} 라벨이 없습니다. ready로 바꾸면 다시 돌고 라벨이 없으면 실패합니다. 이 통과는 merge 근거가 아닙니다.`;
+  return [`::warning title=harness 라벨 판정 보류(draft)::${message}`];
 }
 
 /** package.json에서 검사·테스트 범위를 정하는 필드: scripts와 jest 설정(jest.config.* 대신 둘 수 있다, #56) */
@@ -69,9 +89,9 @@ function checkFields(text: string | null): string {
 }
 
 export function runHarnessChange(
-  options: BaseArgs & { cwd: string; labels: string[] | null },
+  options: BaseArgs & { cwd: string; labels: string[] | null; draft?: boolean | undefined },
 ): HarnessResult {
-  const { cwd, base, head, strict, labels } = options;
+  const { cwd, base, head, strict, labels, draft = false } = options;
   const found = findMergeBase(cwd, base, head);
   if (!found.ok) return { ...missingBase("check:harness-change", found.reason, strict), files: [] };
 
@@ -124,6 +144,18 @@ export function runHarnessChange(
       files,
     };
   }
+  if (draft) {
+    return {
+      status: "warn",
+      deferred: true,
+      lines: [
+        `check:harness-change: 판정 보류(draft) — 하네스 파일이 바뀌었는데 PR에 \`${HARNESS_LABEL}\` 라벨이 없습니다. ready로 바꾸면 다시 돌고, 그때 라벨이 없으면 실패합니다.`,
+        ...list,
+        `대신 할 일: ready로 바꾸기 전에 팀장이 \`${HARNESS_LABEL}\` 라벨을 붙입니다. 하네스 변경이 의도한 것이 아니면 그 파일을 되돌리세요.`,
+      ],
+      files,
+    };
+  }
   return {
     status: "fail",
     lines: [
@@ -140,15 +172,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const cwd = fileURLToPath(new URL("..", import.meta.url));
   const { rest, ...options } = parseBaseArgs(process.argv.slice(2));
   let labels: string[] | null = null;
+  let draft = false;
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === "--labels") {
       labels = (rest[++i] ?? "")
         .split(",")
         .map((label) => label.trim())
         .filter(Boolean);
-    } else throw new Error(`알 수 없는 인자: ${rest[i]}`);
+    } else if (rest[i] === "--draft") draft = parseDraft(rest[++i]);
+    else throw new Error(`알 수 없는 인자: ${rest[i]}`);
   }
-  const result = runHarnessChange({ cwd, ...options, labels });
+  const result = runHarnessChange({ cwd, ...options, labels, draft });
   (result.status === "fail" ? console.error : console.log)(result.lines.join("\n"));
+  for (const line of draftAnnotation(result, process.env)) console.log(line);
+  if (result.deferred && process.env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `### harness 라벨: draft라 판정 보류\n\n${result.lines.join("\n")}\n\n이 통과는 merge 근거가 아니다. ready로 바꾼 뒤 시작된 실행의 결과를 본다.\n`,
+    );
+  }
   process.exit(result.status === "fail" ? 1 : 0);
 }

@@ -11,12 +11,21 @@ name: Harness guard
 # PR이 그 단계나 스크립트를 지우면 함께 사라진다. 이 워크플로는 pull_request_target이라 기준 브랜치(main)에
 # 있는 정의와 스크립트로 돈다. PR의 코드는 실행하지 않고 git 객체로만 받아 diff를 본다.
 # main에 merge된 뒤부터 돈다. 막는 검사로 쓰려면 브랜치 보호의 필수 검사에 넣는다(PM 설정).
+#
+# 이슈 #61(PM 승인 2026-11-28 A안): draft PR에서는 라벨이 없어도 실패 대신 "판정 보류" 경고(어노테이션·job 요약)로 둔다.
+# ready_for_review로 ready가 되면 같은 SHA에서 다시 돌고, ready 상태의 push·라벨 변경과 함께 지금처럼 강제한다.
+# draft 여부와 라벨은 이벤트 payload가 아니라 실행 시점의 PR 상태를 API로 읽어 정한다(QA 반려 F1). 늦게 큐에 들어간
+# 예전 이벤트의 실행이 concurrency로 새 실행을 취소해도, 그 실행이 지금 상태(ready, 지금 라벨)로 판정한다.
+# draft PR은 GitHub가 merge를 막는다. ready 전환 직후 새 실행이 생기기 전에는 draft 때의 통과가 최신 결과로 남는다
+# (워크플로로 막을 수 없는 틈). 그래서 merge 전에 "ready 뒤에 시작됐고 판정 보류 경고가 없는 통과"를 확인한다(team-lead 스킬 6장).
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
 
+# pull-requests: read는 실행 시점의 PR 상태(draft·라벨)를 읽는 데만 쓴다(#61). 토큰은 그 단계의 env에만 둔다.
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: harness-guard-${{ github.event.pull_request.number }}
@@ -42,10 +51,34 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
 
+      # 실행 시점의 PR 상태. 응답은 draft(true/false)와 라벨 이름만 쓴다. 읽지 못하면 ready·라벨 없음으로 본다(강제 쪽).
+      - name: Read PR state (실행 시점)
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          state="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.draft, ([.labels[].name] | join(","))' || true)"
+          draft="$(printf '%s\n' "$state" | sed -n 1p)"
+          labels="$(printf '%s\n' "$state" | sed -n 2p)"
+          case "$draft" in
+            true | false) ;;
+            *)
+              echo "::warning title=PR 상태::실행 시점의 PR 상태를 읽지 못해 ready·라벨 없음으로 판정한다"
+              draft=false
+              labels=""
+              ;;
+          esac
+          labels="$(printf '%s' "$labels" | tr -d '\r\n')"
+          echo "draft=${draft}" >> "$GITHUB_OUTPUT"
+          echo "labels=${labels}" >> "$GITHUB_OUTPUT"
+
       - name: Harness change label
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_LABELS: ${{ steps.pr.outputs.labels }}
+          PR_DRAFT: ${{ steps.pr.outputs.draft }}
         run: >-
           node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/check-harness-change.ts
-          --base "$BASE_SHA" --head refs/remotes/pr/head --labels "$PR_LABELS" --strict
+          --base "$BASE_SHA" --head refs/remotes/pr/head --labels "$PR_LABELS" --draft "$PR_DRAFT" --strict

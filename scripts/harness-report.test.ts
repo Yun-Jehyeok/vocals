@@ -1,19 +1,34 @@
-// harness-report 단위 테스트 (이슈 #17 하네스 6단계): 가짜 로그와 가짜 gh 응답으로 보고 내용을 확인한다.
+// harness-report 단위 테스트 (이슈 #17 하네스 6단계, #61 확장): 가짜 로그와 가짜 gh 응답으로 보고 내용을 확인한다.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Gh } from "./harness-report.ts";
+import type { IssueInfo, PrInfo, WorkData } from "./harness-report.ts";
 import {
+  afterAcceptance,
   buildReport,
+  classifyStep,
   countPmMarkers,
+  countPmQuestions,
+  draftDeferSince,
+  escapedOrigin,
   fetchCiFailures,
   fetchComments,
+  fetchWork,
   isQaRejection,
+  issueRows,
   loadRuleIds,
+  parseIssueFilter,
+  periodsOf,
+  prIssueRefs,
+  qaReproAfterRejection,
   readLogs,
   runReport,
+  scopeIssues,
+  summarize,
 } from "./harness-report.ts";
 
 const NOW = new Date("2026-11-21T12:00:00Z");
@@ -64,6 +79,45 @@ const comment = (body: string, ref: number, created = "2026-11-20T00:00:00Z") =>
   created_at: created,
   issue_url: `https://api.github.com/repos/o/r/issues/${ref}`,
 });
+
+const approval = (ts: string, role: string, tool: string) =>
+  JSON.stringify({
+    ts,
+    session: "aaaa1111",
+    event: "approval",
+    rule: "approval.wait",
+    role,
+    tool,
+    target: null,
+  });
+
+function pr(number: number, extra: Partial<PrInfo> = {}): PrInfo {
+  return {
+    number,
+    title: `PR ${number}`,
+    body: "",
+    state: "closed",
+    created: "2026-11-01T00:00:00Z",
+    updated: "2026-11-20T00:00:00Z",
+    merged: null,
+    headRef: `b/${number}`,
+    labels: [],
+    ...extra,
+  };
+}
+
+function issue(number: number, created: string, extra: Partial<IssueInfo> = {}): IssueInfo {
+  return {
+    number,
+    title: `이슈 ${number}`,
+    body: "",
+    state: "open",
+    created,
+    closed: null,
+    labels: [],
+    ...extra,
+  };
+}
 
 describe("harness-report: 훅 차단 로그 집계 (이슈 #17 6단계)", () => {
   it("기간 안의 차단만 규칙별·역할별로 세고, 읽지 못한 줄을 따로 센다", () => {
@@ -215,13 +269,43 @@ describe("harness-report: 댓글 표식 (이슈 #17 6단계)", () => {
   });
 });
 
-describe("harness-report: CI 실패 원인 (이슈 #17 6단계)", () => {
+const ACC = "Acceptance: qa";
+
+describe("harness-report: CI 실패 — 예상된 실패와 실제 실패 (이슈 #17 6단계, #61)", () => {
+  const prs: PrInfo[] = [
+    pr(58, { state: "open", headRef: "feat/58" }),
+    pr(50, { merged: "2026-11-20T10:00:00Z", labels: ["harness"], headRef: "fix/50" }),
+    pr(47, { merged: "2026-11-20T10:00:00Z", headRef: "feat/47" }),
+  ];
+  const failing = (name: string) => ({ name, conclusion: "failure" });
   const gh = fakeGh({
     [`${R}/actions/runs?`]: {
       workflow_runs: [
-        { id: 1, created_at: "2026-11-20T00:00:00Z" },
-        { id: 2, created_at: "2026-11-19T00:00:00Z" },
-        { id: 3, created_at: "2026-11-01T00:00:00Z" },
+        // 1: 열린 PR의 라벨 단계(예상) + Format(실제)
+        {
+          id: 1,
+          created_at: "2026-11-20T00:00:00Z",
+          head_sha: "h1",
+          pull_requests: [{ number: 58 }],
+        },
+        // 2: 라벨이 붙은 PR의 harness-guard job(예상). PR 번호는 head_branch로 찾는다
+        { id: 2, created_at: "2026-11-19T00:00:00Z", head_sha: "h2", head_branch: "fix/50" },
+        // 3: 인수 테스트 커밋 뒤 merge 커밋이 head인 Test 실패(예상)
+        {
+          id: 3,
+          created_at: "2026-11-19T01:00:00Z",
+          head_sha: "c3",
+          pull_requests: [{ number: 47 }],
+        },
+        // 4: 구현 커밋이 head인 Test(실제), 라벨 없이 merge된 PR의 라벨 단계(실제)
+        {
+          id: 4,
+          created_at: "2026-11-19T02:00:00Z",
+          head_sha: "c4",
+          pull_requests: [{ number: 47 }],
+        },
+        // 5: 기간 밖
+        { id: 5, created_at: "2026-11-01T00:00:00Z", head_sha: "x" },
       ],
     },
     [`${R}/actions/runs/1/jobs`]: {
@@ -230,34 +314,50 @@ describe("harness-report: CI 실패 원인 (이슈 #17 6단계)", () => {
           name: "check",
           conclusion: "failure",
           steps: [
-            { name: "Format", conclusion: "failure" },
+            failing("Format"),
+            failing("Harness change label"),
             { name: "Lint", conclusion: "skipped" },
           ],
         },
-        { name: "harness-change", conclusion: "success", steps: [] },
       ],
     },
     [`${R}/actions/runs/2/jobs`]: {
+      jobs: [{ name: "harness-change", conclusion: "failure", steps: [] }],
+    },
+    [`${R}/actions/runs/3/jobs`]: {
+      jobs: [{ name: "check", conclusion: "failure", steps: [failing("Test")] }],
+    },
+    [`${R}/actions/runs/4/jobs`]: {
       jobs: [
         {
           name: "check",
           conclusion: "failure",
-          steps: [{ name: "Format", conclusion: "failure" }],
+          steps: [failing("Test"), failing("Harness change label")],
         },
-        { name: "harness-change", conclusion: "failure", steps: [] },
       ],
     },
+    [`${R}/pulls/47/commits`]: [
+      { sha: "c1", commit: { message: `test: #47 인수 테스트\n\n${ACC}\nCo-Authored-By: x` } },
+      { sha: "c2", commit: { message: "chore: #47 QA 메모리" } },
+      { sha: "c3", commit: { message: "Merge remote-tracking branch 'origin/main' into feat/47" } },
+      { sha: "c4", commit: { message: "feat: #47 구현" } },
+    ],
   });
+  const since = new Date(NOW.getTime() - 7 * 86_400_000);
 
-  it("실패한 job의 실패 step별로 세고, 2회 이상이면 승격을 제안한다", () => {
-    const since = new Date(NOW.getTime() - 7 * 86_400_000);
-    const ci = fetchCiFailures(gh, since);
-    expect(ci?.failedRuns).toBe(2);
-    expect([...(ci?.steps ?? [])]).toEqual([
-      ["check › Format", 2],
-      ["harness-change › (step 없음)", 1],
+  it("실패 step을 라벨 단계·인수 테스트 직후 Test·실제 실패로 나눈다", () => {
+    const ci = fetchCiFailures(gh, since, prs);
+    expect(
+      ci?.runs.map((run) => [run.id, run.pr, run.steps.map((s) => `${s.key}=${s.kind}`)]),
+    ).toEqual([
+      [1, 58, ["check › Format=real", "check › Harness change label=label"]],
+      [2, 50, ["harness-change › (step 없음)=label"]],
+      [3, 47, ["check › Test=acceptance"]],
+      [4, 47, ["check › Test=real", "check › Harness change label=real"]],
     ]);
-    expect(gh.calls.some((c) => c.includes("runs/3/jobs"))).toBe(false);
+    // PR 커밋 목록은 PR마다 한 번만 읽는다
+    expect(gh.calls.filter((c) => c.includes("pulls/47/commits"))).toHaveLength(1);
+    expect(gh.calls.some((c) => c.includes("runs/5/jobs"))).toBe(false);
     expect(gh.calls[0]).toContain("created=%3E%3D2026-11-14");
 
     const report = buildReport({
@@ -268,10 +368,435 @@ describe("harness-report: CI 실패 원인 (이슈 #17 6단계)", () => {
       comments: "skip",
       ci,
     });
-    expect(report).toContain("실패한 실행 2개");
-    expect(report).toContain("| check › Format | 2 |");
-    expect(report).toContain("- CI `check › Format` 2회: 파일을 고친 뒤 `pnpm format`");
-    expect(report).not.toContain("- CI `harness-change");
+    expect(report).toContain(
+      "실패한 실행 4개 — 예상된 실패만 있는 실행 2개, 실제 실패가 있는 실행 2개",
+    );
+    expect(report).toContain(
+      "실패 step 6건 — 라벨 단계 2건, 인수 테스트 직후 Test 1건, QA 반려 뒤 재현 테스트 0건(여기까지 예상된 실패), 실제 실패 3건",
+    );
+    expect(report).toContain("| check › Test | 1 (인수 테스트 직후 Test) | 1 |");
+    expect(report).toContain("| check › Harness change label | 1 (라벨 단계) | 1 |");
+    expect(report).toContain("| check › Format | 0 | 1 |");
+    // 승격 제안은 실제 실패가 2회 이상인 step만
+    expect(report).not.toContain("- CI `check › Format`");
+  });
+
+  it("실제 실패가 2회 이상인 step만 승격을 제안한다", () => {
+    const run = (id: number, kind: "real" | "label") => ({
+      id,
+      created: "2026-11-20T00:00:00Z",
+      pr: 1,
+      steps: [{ key: "check › Format", kind }],
+    });
+    const report = buildReport({
+      now: NOW,
+      days: 7,
+      logs: readLogs(dir),
+      ruleIds: {},
+      comments: "skip",
+      ci: { runs: [run(1, "real"), run(2, "real"), run(3, "label")], truncated: false },
+    });
+    expect(report).toContain("- CI `check › Format` 실제 실패 2회: 파일을 고친 뒤 `pnpm format`");
+  });
+
+  it("afterAcceptance: head부터 거슬러 인수 테스트 커밋을 구현 커밋보다 먼저 만나야 참", () => {
+    const commits = [
+      { sha: "a", message: "feat: 앞 구현" },
+      { sha: "b", message: `test: 인수 테스트\n\n${ACC}` },
+      { sha: "c", message: "docs: 메모" },
+      { sha: "d", message: "fix(shared): 구현" },
+    ];
+    expect(afterAcceptance(commits, "c")).toBe(true);
+    expect(afterAcceptance(commits, "b")).toBe(true);
+    expect(afterAcceptance(commits, "d")).toBe(false);
+    expect(afterAcceptance(commits, "a")).toBe(false);
+    expect(afterAcceptance(commits, "없음")).toBe(false); // 못 찾으면 마지막 커밋(d)부터
+    expect(afterAcceptance([{ sha: "x", message: `본문에 ${ACC}라고 씀` }], "x")).toBe(false);
+  });
+
+  it("classifyStep: 라벨 단계는 라벨이 있거나 열린 PR일 때만 예상된 실패", () => {
+    const label = (p: { state: string; labels: string[] } | null) =>
+      classifyStep("check", "Harness change label", { pr: p, afterAcceptance: false });
+    expect(label({ state: "open", labels: [] })).toBe("label");
+    expect(label({ state: "closed", labels: ["harness"] })).toBe("label");
+    expect(label({ state: "closed", labels: [] })).toBe("real");
+    expect(label(null)).toBe("real");
+    expect(classifyStep("check", "Test", { pr: null, afterAcceptance: true })).toBe("acceptance");
+    expect(classifyStep("check", "Lint", { pr: null, afterAcceptance: true })).toBe("real");
+  });
+
+  it("qaReproAfterRejection: head가 test: 커밋이고 그 전에 [QA 반려]가 있어야 참 (#61 QA 반려 F3)", () => {
+    const commits = [
+      { sha: "f", message: "fix: #48 고침", date: "2026-11-22T01:00:00Z" },
+      { sha: "t", message: "test: #48 반려 재현", date: "2026-11-22T03:00:00Z" },
+    ];
+    expect(qaReproAfterRejection(commits, "t", ["2026-11-22T02:00:00Z"])).toBe(true);
+    expect(qaReproAfterRejection(commits, "t", ["2026-11-22T04:00:00Z"])).toBe(false); // 반려가 뒤
+    expect(qaReproAfterRejection(commits, "t", [])).toBe(false);
+    expect(qaReproAfterRejection(commits, "f", ["2026-11-22T00:00:00Z"])).toBe(false); // head가 fix:
+    expect(
+      qaReproAfterRejection([{ sha: "s", message: "test(shared): 재현" }], "s", [
+        "2026-11-22T00:00:00Z",
+      ]),
+    ).toBe(false); // 시각을 모르면 거짓
+  });
+
+  it("[QA 반려] 뒤 QA 재현 test: 커밋이 head인 Test 실패는 예상된 실패(repro)로 다시 나눈다 (F3)", () => {
+    const gh = fakeGh({
+      [`${R}/actions/runs?`]: {
+        workflow_runs: [
+          {
+            id: 7,
+            created_at: "2026-11-20T03:10:00Z",
+            head_sha: "t",
+            pull_requests: [{ number: 50 }],
+          },
+          {
+            id: 8,
+            created_at: "2026-11-20T01:10:00Z",
+            head_sha: "f",
+            pull_requests: [{ number: 50 }],
+          },
+        ],
+      },
+      [`${R}/actions/runs/`]: {
+        jobs: [{ name: "check", conclusion: "failure", steps: [failing("Test")] }],
+      },
+      [`${R}/pulls/50/commits`]: [
+        {
+          sha: "f",
+          commit: { message: "fix: #48 고침", committer: { date: "2026-11-20T01:00:00Z" } },
+        },
+        {
+          sha: "t",
+          commit: { message: "test: #48 재현", committer: { date: "2026-11-20T03:00:00Z" } },
+        },
+      ],
+    });
+    const rejection = { body: "[QA 반려] 2차", ref: "#50", created: "2026-11-20T02:00:00Z" };
+    const other = { body: "[QA 반려] 다른 PR", ref: "#51", created: "2026-11-20T00:00:00Z" };
+    const ci = fetchCiFailures(gh, since, prs, null, [rejection, other]);
+    expect(ci?.runs.map((run) => run.steps[0]?.kind)).toEqual(["repro", "real"]);
+    // 반려 댓글을 모르면 예전처럼 실제 실패
+    expect(fetchCiFailures(gh, since, prs, null, [other])?.runs[0]?.steps[0]?.kind).toBe("real");
+    const report = buildReport({
+      now: NOW,
+      days: 7,
+      logs: readLogs(dir),
+      ruleIds: {},
+      comments: "skip",
+      ci,
+    });
+    expect(report).toContain("| check › Test | 1 (QA 반려 뒤 재현 테스트) | 1 |");
+    expect(report).toContain("예상된 실패만 있는 실행 1개, 실제 실패가 있는 실행 1개");
+  });
+
+  it("PR 커밋 목록을 못 읽으면 CI 절을 조회 실패로 둔다(부분 결과 없음)", () => {
+    const broken = fakeGh({
+      [`${R}/actions/runs?`]: {
+        workflow_runs: [
+          {
+            id: 3,
+            created_at: "2026-11-19T01:00:00Z",
+            head_sha: "c3",
+            pull_requests: [{ number: 47 }],
+          },
+        ],
+      },
+      [`${R}/actions/runs/3/jobs`]: {
+        jobs: [{ name: "check", conclusion: "failure", steps: [failing("Test")] }],
+      },
+    });
+    expect(fetchCiFailures(broken, since, prs)).toBeNull();
+  });
+});
+
+describe("harness-report: 이슈별 지표 (이슈 #61)", () => {
+  const work: WorkData = {
+    issues: [
+      issue(61, "2026-11-20T00:00:00Z"),
+      issue(56, "2026-11-18T00:00:00Z"),
+      issue(41, "2026-11-10T00:00:00Z", { state: "closed", closed: "2026-11-11T00:00:00Z" }),
+      issue(70, "2026-11-20T06:00:00Z", {
+        labels: ["escaped", "bug"],
+        body: "증상\n\n원래 이슈: #43\n관련: #56",
+      }),
+      issue(71, "2026-11-20T07:00:00Z", { labels: ["escaped"], body: "원래 이슈 표시 없음" }),
+    ],
+    prs: [
+      pr(62, { title: "chore: #61 측정", merged: "2026-11-21T00:00:00Z" }),
+      pr(63, {
+        title: "fix: 후속",
+        body: "- 이슈: #61 (근거: #17)",
+        merged: "2026-11-20T12:00:00Z",
+      }),
+      pr(57, { title: "docs: #56 문서", merged: "2026-11-19T00:00:00Z" }),
+      pr(58, { title: "feat: #56 앱", state: "open" }),
+      pr(43, { title: "feat: 묶음 6", body: "Closes #41", merged: "2026-11-10T12:00:00Z" }),
+      pr(44, { title: "docs: #43 PR을 가리킴", merged: "2026-11-10T13:00:00Z" }),
+    ],
+  };
+  const comments = [
+    { body: "[QA 반려] ATT-02", ref: "#62", created: "2026-11-20T20:00:00Z" },
+    { body: "[QA 반려] 다시", ref: "#61", created: "2026-11-20T21:00:00Z" },
+    {
+      body: "회의록 — 개발 단계\n- 개발→QA: …\nPM 질문: 2건",
+      ref: "#61",
+      created: "2026-11-20T22:00:00Z",
+    },
+    {
+      body: "회의록\n- PM 질문: 1건\n```\nPM 질문: 9건\n```",
+      ref: "#56",
+      created: "2026-11-19T00:00:00Z",
+    },
+    { body: "[QA 반려] 오래된 반려", ref: "#43", created: "2026-11-10T11:00:00Z" },
+  ];
+
+  it("PR 제목의 #번호, 본문의 `이슈: #번호`·Closes만 연결로 본다", () => {
+    expect(prIssueRefs({ title: "docs: #35·#38 결정", body: "근거 #17" })).toEqual([35, 38]);
+    expect(
+      prIssueRefs({ title: "fix: x", body: "- 이슈: #48 (근거: #17, #23)\nCloses #49" }),
+    ).toEqual([48, 49]);
+    expect(prIssueRefs({ title: "x", body: "이슈 #49. 관련 #12" })).toEqual([49]);
+    expect(prIssueRefs({ title: "x", body: "관련 이슈: #10, #11" })).toEqual([10]);
+    // 문장 속 `이슈 #번호`는 근거 언급이라 연결이 아니다(실제 PR #14·#22의 오연결)
+    expect(prIssueRefs({ title: "x", body: "- 표기 (개발 질문, 이슈 #17)" })).toEqual([]);
+    expect(prIssueRefs({ title: "x", body: "- 출처: PR #1, 이슈 #11·#15 본문" })).toEqual([]);
+    expect(prIssueRefs({ title: "x", body: "`이슈: #5`는 예시" })).toEqual([]);
+  });
+
+  it("escaped 이슈의 원래 이슈는 `원래 이슈: #번호`", () => {
+    expect(escapedOrigin({ body: "원래 이슈: #41" })).toBe(41);
+    expect(escapedOrigin({ body: "- 원래 이슈 #41" })).toBe(41);
+    expect(escapedOrigin({ body: "#41에서 샘" })).toBeNull();
+  });
+
+  it("`PM 질문: n건` 줄을 합하고 코드·줄 중간의 글자는 세지 않는다", () => {
+    expect(countPmQuestions("회의록\n- PM 질문: 2건\nPM 질문: 1건")).toBe(3);
+    expect(countPmQuestions("형식은 `PM 질문: 3건`\n```\nPM 질문: 4건\n```")).toBe(0);
+    expect(countPmQuestions("오늘 PM 질문: 5건이 있었다")).toBe(0);
+    expect(countPmQuestions("- PM 질문: 0건")).toBe(0);
+  });
+
+  it("리드타임(이슈 생성 → 마지막 연결 PR merge), QA 반려, PM 질문, merge 뒤 결함을 이슈마다 낸다", () => {
+    const rows = issueRows(work, comments, [61, 56, 41]);
+    expect(
+      rows.map((r) => [
+        r.number,
+        r.mergedPrs,
+        r.openPrs,
+        r.leadMs,
+        r.qaRejections,
+        r.pmQuestions,
+        r.escaped,
+      ]),
+    ).toEqual([
+      [61, [62, 63], [], 86_400_000, 2, 2, []],
+      [56, [57], [58], 86_400_000, 0, 1, []],
+      // escaped #70은 PR #43을 가리켜 그 PR의 이슈 #41로 센다. #44 제목의 #43은 PR이라 연결하지 않는다
+      [41, [43], [], 12 * 3_600_000, 1, 0, [70]],
+    ]);
+  });
+
+  it("이슈 범위: 기간 안 생성·닫힘·연결 PR merge, 또는 --issues", () => {
+    const period = { start: new Date("2026-11-19T00:00:00Z"), end: NOW };
+    expect(scopeIssues(work, period, null).sort((a, b) => a - b)).toEqual([56, 61, 70, 71]);
+    expect(scopeIssues(work, period, [41, 99])).toEqual([41]);
+    expect(parseIssueFilter("50-52,17,#61")).toEqual([17, 50, 51, 52, 61]);
+    expect(() => parseIssueFilter("abc")).toThrow("--issues");
+  });
+
+  it("보고에 승인 대기, 이슈별 표, escaped 원래 이슈 누락, 지난 보고 대비 표가 나온다", () => {
+    const report = buildReport({
+      now: NOW,
+      days: 3,
+      logs: readLogs(
+        writeLogs({
+          "a.jsonl": [
+            event("2026-11-20T01:00:00Z", "qa.scope", "qa"),
+            event("2026-11-20T02:00:00Z", "qa.scope", "qa"),
+            event("2026-11-16T02:00:00Z", "planner.scope", "planner"),
+            approval("2026-11-20T03:00:00Z", "developer", "Edit"),
+            approval("2026-11-20T04:00:00Z", "developer", "Edit"),
+            approval("2026-11-17T04:00:00Z", "qa", "Bash"),
+          ],
+        }),
+      ),
+      ruleIds: RULES,
+      comments,
+      ci: { runs: [], truncated: false },
+      work,
+    });
+    expect(report).toContain("## 하네스 측정 보고 — 2026-11-18 ~ 2026-11-21 (최근 3일)");
+    expect(report).toContain("`approval.wait` 2회");
+    expect(report).toContain("역할: developer 2");
+    expect(report).toContain("| `Edit` | 2 |");
+    expect(report).toContain("회의록 `PM 질문: n건` 합 3건 — #61 2, #56 1");
+    expect(report).toContain("| #61 | 열림 | #62 #63 | 1.0일 | 2 | 2 | 0 |");
+    expect(report).toContain("| #56 | 열림 | #57 #58(열림) | 1.0일 | 0 | 1 | 0 |");
+    expect(report).toContain("본문에 `원래 이슈: #번호`가 없는 것 1개: #71");
+    expect(report).toContain(
+      "| 지표 | 이번 (2026-11-18 ~ 2026-11-21) | 지난 (2026-11-15 ~ 2026-11-18) | 변화 |",
+    );
+    expect(report).toContain("| 훅 차단 (건) | 2 | 1 | +1 |");
+    expect(report).toContain("| └ 2회 이상 반복된 규칙의 차단 (건) | 2 | 0 | +2 |");
+    expect(report).toContain("| 승인 대기 `approval.wait` (회)¹ | 2 | 1 | +1 |");
+    expect(report).toContain("| QA 반려 (건) | 2 | 0 | +2 |");
+    expect(report).toContain("| merge 뒤 결함 `escaped` 이슈 (건)¹ | 2 | 0 | +2 |");
+    expect(report).toContain("| 완료 이슈 (개) | 2 | 0 | +2 |");
+    expect(report).toContain("| 완료 이슈 리드타임 중앙값 | 1.0일 | 없음 | — |");
+    expect(report).toContain("첫 기록 — 승인 대기: 2026-11-17, 회의록 PM 질문: 2026-11-19");
+    // 승인 대기는 차단 집계에 섞이지 않는다
+    expect(report).toContain("총 2건, 세션 1개");
+    expect(report).not.toContain("| `approval.wait` |");
+  });
+
+  it("--since는 그날부터 지금까지, 지난 기간은 같은 길이의 바로 앞", () => {
+    const since = new Date("2026-11-19T00:00:00Z");
+    const { current, previous } = periodsOf({ now: NOW, days: 7, since });
+    expect(current.start.toISOString()).toBe("2026-11-19T00:00:00.000Z");
+    expect(previous.start.toISOString()).toBe("2026-11-16T12:00:00.000Z");
+    expect(previous.end.toISOString()).toBe("2026-11-19T00:00:00.000Z");
+    const report = buildReport({
+      now: NOW,
+      days: 7,
+      since,
+      logs: readLogs(dir),
+      ruleIds: {},
+      comments: "skip",
+      ci: "skip",
+    });
+    expect(report).toContain(
+      "## 하네스 측정 보고 — 2026-11-19 ~ 2026-11-21 (2026-11-19부터 2.5일)",
+    );
+  });
+
+  it("summarize: 조회 실패한 지표는 null, 완료 이슈 리드타임 중앙값", () => {
+    const period = { start: new Date("2026-11-01T00:00:00Z"), end: NOW };
+    const summary = summarize(period, { logs: readLogs(dir), comments: null, ci: null, work });
+    expect(summary.pmMarkers).toBeNull();
+    expect(summary.ciRuns).toBeNull();
+    expect(summary.doneIssues).toBe(3);
+    expect(summary.medianLeadMs).toBe(86_400_000);
+  });
+
+  it("fetchWork: 이슈 목록의 PR은 빼고 라벨 이름만 남긴다", () => {
+    const gh = fakeGh({
+      [`${R}/pulls?state=all`]: [
+        {
+          number: 62,
+          title: "chore: #61",
+          body: null,
+          state: "closed",
+          created_at: "c",
+          updated_at: "u",
+          merged_at: "m",
+          head: { ref: "chore/61" },
+          labels: [{ name: "harness" }],
+        },
+      ],
+      [`${R}/issues?state=all`]: [
+        { number: 62, pull_request: {}, title: "PR", created_at: "c" },
+        {
+          number: 61,
+          title: "측정",
+          body: "b",
+          state: "open",
+          created_at: "c",
+          closed_at: null,
+          labels: [{ name: "escaped" }],
+        },
+      ],
+    });
+    expect(fetchWork(gh)).toEqual({
+      prs: [
+        pr(62, {
+          title: "chore: #61",
+          created: "c",
+          updated: "u",
+          merged: "m",
+          headRef: "chore/61",
+          labels: ["harness"],
+        }),
+      ],
+      issues: [issue(61, "c", { title: "측정", body: "b", labels: ["escaped"] })],
+    });
+    expect(fetchWork(fakeGh({}))).toBeNull();
+  });
+});
+
+describe("harness-report: draft 판정 보류 뒤의 CI 집계 (이슈 #61, PM 승인 A안)", () => {
+  it("판정 보류가 main에 들어간 뒤의 라벨 단계 실패는 ready에서 라벨이 없던 것이라 실제 실패", () => {
+    const open = { state: "open", labels: [] };
+    const step = (draftDeferred: boolean) =>
+      classifyStep("harness-change", "Harness change label", {
+        pr: open,
+        afterAcceptance: false,
+        draftDeferred,
+      });
+    expect(step(false)).toBe("label");
+    expect(step(true)).toBe("real");
+    // Test 분류는 그대로
+    expect(
+      classifyStep("check", "Test", { pr: open, afterAcceptance: true, draftDeferred: true }),
+    ).toBe("acceptance");
+  });
+
+  it("fetchCiFailures는 보류 시작 뒤의 실행만 새 기준으로 나누고 보고에 시작일을 적는다", () => {
+    const gh = fakeGh({
+      [`${R}/actions/runs?`]: {
+        workflow_runs: [
+          { id: 1, created_at: "2026-11-18T00:00:00Z", pull_requests: [{ number: 58 }] },
+          { id: 2, created_at: "2026-11-20T00:00:00Z", pull_requests: [{ number: 58 }] },
+        ],
+      },
+      [`${R}/actions/runs/`]: {
+        jobs: [{ name: "harness-change", conclusion: "failure", steps: [] }],
+      },
+    });
+    const since = new Date(NOW.getTime() - 7 * 86_400_000);
+    const prs = [pr(58, { state: "open" })];
+    const ci = fetchCiFailures(gh, since, prs, new Date("2026-11-19T00:00:00Z"));
+    expect(ci?.runs.map((run) => run.steps[0]?.kind)).toEqual(["label", "real"]);
+    const base = { now: NOW, days: 7, logs: readLogs(dir), ruleIds: {}, comments: "skip" as const };
+    expect(buildReport({ ...base, ci })).toContain(
+      "draft 판정 보류(#61)가 2026-11-19부터 main에 있다",
+    );
+    expect(buildReport({ ...base, ci: fetchCiFailures(gh, since, prs) })).toContain(
+      "draft 판정 보류(#61)는 아직 main에 없다",
+    );
+  });
+
+  it("draftDeferSince: main의 harness-guard.yml에 --draft가 들어간 merge 시각(first-parent)", () => {
+    const repo = mkdtempSync(join(tmpdir(), "defer-since-"));
+    const run = (args: string[], date?: string) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd: repo,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: date ? { ...process.env, GIT_COMMITTER_DATE: date } : process.env,
+      });
+    const file = join(repo, ".github", "workflows", "harness-guard.yml");
+    mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+    try {
+      run(["init", "-q", "-b", "main"]);
+      writeFileSync(file, '--labels "$PR_LABELS" --strict\n');
+      run(["add", "-A"]);
+      run(["commit", "-qm", "init"], "2026-11-10T00:00:00Z");
+      run(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+      expect(draftDeferSince(repo)).toBeNull();
+      run(["checkout", "-qb", "work"]);
+      writeFileSync(file, '--labels "$PR_LABELS" --draft "$PR_DRAFT" --strict\n');
+      run(["commit", "-qam", "chore: draft"], "2026-11-15T00:00:00Z");
+      run(["checkout", "-q", "main"]);
+      run(["merge", "-q", "--no-ff", "-m", "Merge", "work"], "2026-11-20T00:00:00Z");
+      run(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+      // 브랜치 커밋 시각(11-15)이 아니라 main에 merge된 시각
+      expect(draftDeferSince(repo)?.toISOString()).toBe("2026-11-20T00:00:00.000Z");
+      expect(draftDeferSince(join(repo, "없음"))).toBeNull();
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 

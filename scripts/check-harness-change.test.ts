@@ -3,7 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isHarnessPath, runHarnessChange } from "./check-harness-change.ts";
+import {
+  draftAnnotation,
+  isHarnessPath,
+  parseDraft,
+  runHarnessChange,
+} from "./check-harness-change.ts";
 
 let repo: string;
 
@@ -38,13 +43,17 @@ function commit(message: string, files: Record<string, string>) {
 const PACKAGE = (scripts: Record<string, string>, deps: Record<string, string> = {}) =>
   JSON.stringify({ name: "x", scripts, devDependencies: deps }, null, 2);
 
-const check = (labels: string[] | null, options: { base?: string; strict?: boolean } = {}) =>
+const check = (
+  labels: string[] | null,
+  options: { base?: string; strict?: boolean; draft?: boolean } = {},
+) =>
   runHarnessChange({
     cwd: repo,
     base: options.base ?? "main",
     head: git("rev-parse", "HEAD").trim(),
     strict: !!options.strict,
     labels,
+    draft: options.draft,
   });
 
 beforeEach(() => {
@@ -132,6 +141,46 @@ describe("하네스 변경 라벨 검사 (이슈 #17 하네스 2단계)", () => 
   it("harness 라벨이 있으면 통과한다", () => {
     commit("chore: CI", { ".github/workflows/ci.yml": "name: CI" });
     expect(check(["harness", "x"]).status).toBe("pass");
+  });
+
+  it("draft PR은 라벨이 없어도 판정 보류 경고, ready면 실패한다 (이슈 #61, PM 승인 A안)", () => {
+    commit("chore: CI", { ".github/workflows/ci.yml": "name: CI" });
+    const draft = check(["bug"], { draft: true, strict: true });
+    expect(draft.status).toBe("warn");
+    expect(draft.deferred).toBe(true);
+    expect(draft.lines[0]).toContain("판정 보류(draft)");
+    expect(draft.files).toEqual([".github/workflows/ci.yml"]);
+    // ready(draft=false, 값 없음)는 지금처럼 실패
+    expect(check(["bug"], { draft: false, strict: true }).status).toBe("fail");
+    expect(check(["bug"], { strict: true }).status).toBe("fail");
+    // draft여도 라벨이 있으면 그냥 통과(보류 아님)
+    const labeled = check(["harness"], { draft: true });
+    expect(labeled.status).toBe("pass");
+    expect(labeled.deferred).toBeUndefined();
+  });
+
+  it("draft여도 하네스 밖만 바뀌면 보류 없이 통과한다 (이슈 #61)", () => {
+    commit("feat: x", { "packages/shared/src/rule.ts": "export const a = 1;" });
+    const result = check([], { draft: true });
+    expect(result.status).toBe("pass");
+    expect(result.deferred).toBeUndefined();
+  });
+
+  it("--draft 값은 정확히 true일 때만 draft다(모르면 강제) (이슈 #61)", () => {
+    expect(parseDraft("true")).toBe(true);
+    for (const value of ["false", "", "TRUE", " true", "1", undefined]) {
+      expect(parseDraft(value)).toBe(false);
+    }
+  });
+
+  it("판정 보류는 GitHub Actions에서만 경고 어노테이션을 낸다 (이슈 #61)", () => {
+    commit("chore: 훅", { "plugins/vocals-team/hooks/guard-bash.mjs": "" });
+    const draft = check([], { draft: true });
+    const [line] = draftAnnotation(draft, { GITHUB_ACTIONS: "true" });
+    expect(line).toMatch(/^::warning title=harness 라벨 판정 보류\(draft\)::/);
+    expect(line).toContain("merge 근거가 아닙니다");
+    expect(draftAnnotation(draft, {})).toEqual([]);
+    expect(draftAnnotation(check(["harness"]), { GITHUB_ACTIONS: "true" })).toEqual([]);
   });
 
   it("라벨을 모르면(로컬) 경고만 한다", () => {

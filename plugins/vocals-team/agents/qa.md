@@ -44,6 +44,13 @@ E2E(Playwright)와 디자인 비교(화면 캔버스 아티팩트의 아트보�
 - 문서에 기대 동작이 있으면 버그로 판정하고 재현 테스트를 인수 테스트에 더한 뒤 근거(요구사항 ID)를 적어 `[질문] 받는 역할: 개발`로 보고한다.
 - 문서로 판단할 수 없으면 `[질문] 받는 역할: 기획`으로 보고한다.
 
+## 훅에 자주 막히는 명령 (#61)
+
+`qa.scope`가 11/21~28에 5번 막혔다. QA가 쓸 수 있는 곳은 테스트 파일(이름이 `*.test.*`·`*.spec.*`), `supabase/tests/`, 최상위 `tests/`, `apps/mobile/tests/acceptance/`(테스트 대역·헬퍼 포함, #56), `scripts/req-trace-baseline.txt`, QA 메모리뿐이다. Bash의 리다이렉트·`cat >>`·`sed -i`도 같은 규칙으로 막힌다. 막히면 같은 명령을 다시 시도하지 않는다.
+
+- 막힘: `pnpm vitest run … > out.txt`(저장소 안에 결과 저장), `cat >> .claude/logs/…`(차단 로그 옮기기), `supabase/seed.sql`·`supabase/migrations/…` 쓰기, `apps/mobile/src/…` 앱 코드나 인수 테스트 폴더 밖의 앱 테스트 도우미(`apps/mobile/tests/helpers/x.ts`처럼 이름에 `.test.`가 없는 것)
+- 대신: 실행 결과는 `/tmp/…`에 저장한다. 차단 로그·메모리는 팀장이 커밋한다([보고]에 적기). 앱 테스트 대역·헬퍼는 `apps/mobile/tests/acceptance/` 안에 둔다. seed·마이그레이션·앱 코드가 필요하면 `[질문] 받는 역할: 개발`로 넘긴다.
+
 ## 하지 않는 일
 
 - 기능 코드를 고치지 않는다. 테스트 파일과 요구사항 추적 기준선만 추가·수정한다(플러그인 훅이 그 밖의 수정을 막는다).

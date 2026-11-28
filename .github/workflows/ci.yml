@@ -3,9 +3,15 @@ name: CI
 on:
   pull_request:
     # 기본값(opened, synchronize, reopened)에 라벨 변경을 더한다. harness 라벨을 붙이거나 떼면 다시 돈다.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # ready_for_review(#61): draft에서 판정 보류였던 라벨 단계를 ready가 된 같은 SHA에서 다시 강제한다.
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
   push:
     branches: [main]
+
+# 이슈 #61: 라벨 단계가 실행 시점의 PR 상태(draft·라벨)를 읽는 데 pull-requests: read를 쓴다. 그 밖의 쓰기 권한은 없다.
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -63,13 +69,39 @@ jobs:
         run: pnpm check:migrations --base "origin/$BASE_REF" --head "$HEAD_SHA" --strict
 
       # 하네스(훅·CI·검사·보호 목록)를 바꾼 PR은 팀장이 붙인 harness 라벨이 있어야 한다. main push에서는 건너뛴다.
+      # draft PR은 라벨이 없어도 판정 보류 경고(어노테이션)로 통과하고, ready가 되면 강제한다(#61, PM 승인 A안).
+      # draft 여부와 라벨은 이벤트 payload가 아니라 실행 시점의 PR 상태로 정한다(QA 반려 F1, harness-guard.yml과 같다).
+      - name: Read PR state (실행 시점)
+        id: pr
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          state="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.draft, ([.labels[].name] | join(","))' || true)"
+          draft="$(printf '%s\n' "$state" | sed -n 1p)"
+          labels="$(printf '%s\n' "$state" | sed -n 2p)"
+          case "$draft" in
+            true | false) ;;
+            *)
+              echo "::warning title=PR 상태::실행 시점의 PR 상태를 읽지 못해 ready·라벨 없음으로 판정한다"
+              draft=false
+              labels=""
+              ;;
+          esac
+          labels="$(printf '%s' "$labels" | tr -d '\r\n')"
+          echo "draft=${draft}" >> "$GITHUB_OUTPUT"
+          echo "labels=${labels}" >> "$GITHUB_OUTPUT"
+
       - name: Harness change label
         if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' }}
         env:
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        run: pnpm check:harness-change --base "origin/$BASE_REF" --head "$HEAD_SHA" --labels "$PR_LABELS" --strict
+          PR_LABELS: ${{ steps.pr.outputs.labels }}
+          PR_DRAFT: ${{ steps.pr.outputs.draft }}
+        run: pnpm check:harness-change --base "origin/$BASE_REF" --head "$HEAD_SHA" --labels "$PR_LABELS" --draft "$PR_DRAFT" --strict
 
       # PR에서는 기준선이 merge-base보다 늘었는지도 본다(2단계).
       - name: Requirement trace

@@ -43,6 +43,18 @@ memory: project
 
 막히지 않은 부분은 계속 진행한다.
 
+## 훅에 자주 막히는 명령 (#61)
+
+11/21~28 차단 20건 중 아래 세 가지가 반복됐다. 막히면 같은 명령을 다시 시도하지 말고 "대신"을 쓴다. 글자를 쪼개 훅을 피하지 않는다.
+
+- `developer.opaque-write` — 훅이 무엇을 쓰는지 모르는 명령(`pnpm`·`npx`·`node 스크립트`·`python`·`xargs`·`$변수` 경로. `pnpm format`도)과 보호 경로 글자(`docs`, `supabase/tests/acceptance`, `tests/acceptance`, `supabase/migrations`, 판정 헬퍼)가 **한 명령**에 있으면 막힌다.
+  - 막힘: `pnpm test && cat docs/erd.md`, `ls supabase/migrations && pnpm db:reset`, `pnpm format && git add docs/…`, `node x.mjs supabase/migrations/…`
+  - 대신: 검사·테스트는 단독으로 실행한다(`pnpm vitest run supabase/tests/acceptance/41-x.test.ts`처럼 검사 자신의 인자는 괜찮다). 읽기는 Read 도구나 따로 실행한 `cat`·`ls`, 새 마이그레이션은 Write 도구로 쓴다.
+- `commit.acceptance-text` — 명령 어디든 `Acceptance:` 글자가 있으면 막힌다. 커밋만이 아니라 `git log --grep`, 테스트 데이터를 쓰는 python heredoc, `gh api -f body=…`도.
+  - 대신: 그 글자가 든 코드·테스트는 Edit·Write 도구로 고치고, 검색은 Grep 도구로 한다. PR 본문·댓글은 Write 도구로 `/tmp/<이름>.md`에 쓰고 `gh api … -F body=@/tmp/<이름>.md`로 보낸다. 커밋 메시지에는 "QA 트레일러"라고 쓴다.
+- `commit.message-source` — 훅이 메시지를 미리 볼 수 없는 커밋이 막힌다: `-m` 안의 백틱(마크다운 `` `코드` ``)·`$(…)`, 같은 명령에서 만든 `-F` 파일(`cat > m.txt <<EOF … && git commit -F m.txt`), `-t`, 편집기·`--trailer` 설정.
+  - 대신: `git commit -F - <<'EOF'` heredoc(본문에 백틱 가능, `git add … &&`와 이어도 된다), 또는 Write 도구로 먼저 쓴 파일을 따로 `git commit -F /tmp/<이름>.txt`.
+
 ## 하지 않는 일
 
 - `docs/`를 고치지 않는다(기획 담당).

@@ -1,5 +1,5 @@
 {
-  "description": "vocals 하네스(이슈 #17): 역할별 파일 쓰기 차단, 되돌리기 어려운 명령 차단, 위험한 Supabase MCP 도구 차단, 팀장 세션 시작 현황",
+  "description": "vocals 하네스(이슈 #17, #61): 역할별 파일 쓰기 차단, 되돌리기 어려운 명령 차단, 위험한 Supabase MCP 도구 차단, 팀장 세션 시작 현황, 승인 요청 기록",
   "hooks": {
     "SessionStart": [
       {
@@ -40,6 +40,17 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-mcp.mjs\"",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/log-approval.mjs\"",
+            "timeout": 10
           }
         ]
       }
