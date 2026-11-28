@@ -41,3 +41,4 @@
 - 설정 파일의 "안전장치" 주석은 외부 도구 문서로 확인한다. 예: Supabase CLI v3에서 `--include-seed`가 `[db.seed] enabled = false`를 무시한다(#59).
 - 앱 인수 테스트에서 재시작을 흉내 내며 라이브러리를 고정할 때, jest-expo 프리셋이 doMock으로 대역을 넣은 모듈(`expo-modules-core`)은 `jest.requireActual`이 아니라 `jest.requireMock`으로 고정한다(#56).
 - 앱 판정 때는 로컬 `pnpm check`만 보지 말고 CI `check` 로그도 본다. CI가 느려 jest 기본 5s 한도를 넘는 렌더 테스트가 있다(#56).
+- 재판정할 때 확인할 것은 세 가지다: 개발 수정 커밋이 말한 범위뿐인지(`git show --stat`), main merge 뒤 `apps/mobile`과 인수 테스트가 바뀌었는지(`git diff --stat <지난 판정 head> HEAD -- apps/mobile`), head sha의 CI check 로그 요약 수. 이 셋이 맞고 바뀐 앱 코드가 없으면 앞 판정의 통과 근거를 그대로 쓴다(#56).

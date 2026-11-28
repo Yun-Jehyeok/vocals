@@ -1,1 +1,2 @@
 {"ts":"2026-11-28T07:23:51.336Z","session":"673715e8","event":"block","rule":"commit.acceptance-text","role":"developer","tool":"Bash","target":null}
+{"ts":"2026-11-28T07:26:14.602Z","session":"673715e8","event":"block","rule":"developer.opaque-write","role":"developer","tool":"Bash","target":"docs/"}
