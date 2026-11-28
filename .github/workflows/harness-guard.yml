@@ -11,9 +11,14 @@ name: Harness guard
 # PR이 그 단계나 스크립트를 지우면 함께 사라진다. 이 워크플로는 pull_request_target이라 기준 브랜치(main)에
 # 있는 정의와 스크립트로 돈다. PR의 코드는 실행하지 않고 git 객체로만 받아 diff를 본다.
 # main에 merge된 뒤부터 돈다. 막는 검사로 쓰려면 브랜치 보호의 필수 검사에 넣는다(PM 설정).
+#
+# 이슈 #61(PM 승인 2026-11-28 A안): draft PR에서는 라벨이 없어도 실패 대신 "판정 보류" 경고(어노테이션·job 요약)로 둔다.
+# ready_for_review로 ready가 되면 같은 SHA에서 다시 돌고, ready 상태의 push·라벨 변경과 함께 지금처럼 강제한다.
+# draft PR은 GitHub가 merge를 막는다. ready 전환 직후 새 실행이 생기기 전 몇 초는 draft 때의 통과가 최신 결과로 남는다
+# (워크플로로 막을 수 없는 틈). 그래서 merge 전에 "ready 전환 뒤 시작된 실행의 결과"를 확인한다(team-lead 스킬 6장).
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
 
 permissions:
   contents: read
@@ -46,6 +51,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
         run: >-
           node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/check-harness-change.ts
-          --base "$BASE_SHA" --head refs/remotes/pr/head --labels "$PR_LABELS" --strict
+          --base "$BASE_SHA" --head refs/remotes/pr/head --labels "$PR_LABELS" --draft "$PR_DRAFT" --strict

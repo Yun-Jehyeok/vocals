@@ -65,6 +65,31 @@ describe("harness-guard.yml 보안 규칙 (이슈 #17 2단계 후속)", () => {
   });
 });
 
+describe("draft PR 라벨 판정 보류 (이슈 #61, PM 승인 2026-11-28 A안)", () => {
+  const ci = read("../.github/workflows/ci.yml");
+
+  it("harness-guard와 ci는 ready_for_review에도 돌아, ready가 되면 같은 SHA에서 다시 강제한다", () => {
+    expect(code).toMatch(/pull_request_target:\s*\n\s*types: \[[^\]]*\bready_for_review\b/);
+    expect(ci).toMatch(/pull_request:\s*\n(?:\s*#.*\n)*\s*types: \[[^\]]*\bready_for_review\b/);
+    // 라벨 변경 트리거는 그대로 둔다
+    expect(ci).toMatch(/types: \[[^\]]*labeled[^\]]*unlabeled/);
+  });
+
+  it("draft 여부는 env로 넘기고 --labels·--strict와 함께 부른다(라벨 검사는 지우지 않는다)", () => {
+    for (const text of [code, ci]) {
+      expect(text).toMatch(/PR_DRAFT: \$\{\{ github\.event\.pull_request\.draft \}\}/);
+      expect(text).toMatch(/--labels "\$PR_LABELS" --draft "\$PR_DRAFT" --strict/);
+      expect(text).toMatch(/- name: Harness change label/);
+    }
+  });
+
+  it("팀장 스킬에 ready 전환 뒤 시작된 실행을 확인하고 merge를 요청하는 규칙이 있다", () => {
+    const skill = read("../plugins/vocals-team/skills/team-lead/SKILL.md");
+    expect(skill).toMatch(/ready로 바꾼 뒤 \*\*그 뒤에 시작된\*\* `harness-change`/);
+    expect(skill).toContain("merge 근거가 아니다");
+  });
+});
+
 describe("하네스 라벨 절차 (이슈 #17 2단계 후속)", () => {
   it("팀장 스킬에 merge 요청 직전 하네스 diff 재확인이 있다", () => {
     const skill = read("../plugins/vocals-team/skills/team-lead/SKILL.md");

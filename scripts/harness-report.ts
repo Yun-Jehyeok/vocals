@@ -415,6 +415,38 @@ export interface CiRun {
 export interface CiData {
   runs: CiRun[];
   truncated: boolean;
+  /** draft 판정 보류(#61)가 main에 들어간 시각. 아직이면 null */
+  draftDeferSince?: string | null;
+}
+
+/**
+ * draft 판정 보류(`--draft "$PR_DRAFT"`)가 main의 harness-guard.yml에 들어간 시각(first-parent의 merge 시각).
+ * 그 뒤 draft PR의 라벨 누락은 실패가 아니라 경고라 CI 실패 목록에 나오지 않는다. git이 실패하거나 아직이면 null.
+ */
+export function draftDeferSince(cwd: string, ref = "origin/main"): Date | null {
+  try {
+    const out = execFileSync(
+      "git",
+      [
+        "log",
+        ref,
+        "--first-parent",
+        "-m",
+        "--format=%cI",
+        '-S--draft "$PR_DRAFT"',
+        "--",
+        ".github/workflows/harness-guard.yml",
+      ],
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    const first = out.at(-1);
+    return first ? new Date(first) : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface CommitInfo {
@@ -445,15 +477,22 @@ export function afterAcceptance(commits: CommitInfo[], headSha: string): boolean
  * 실패 step 하나의 분류.
  * - label: "Harness change label" 단계(또는 harness-guard job). PR이 지금 `harness` 라벨을 가졌거나 아직 열려 있으면
  *   라벨을 붙이기 전 push로 본다. 라벨 없이 닫히거나 merge된 PR, PR을 모르는 실행은 실제 실패.
+ *   draftDeferred(#61: draft 판정 보류가 main에 들어간 뒤의 실행)면 draft는 실패하지 않으므로, 라벨 단계 실패는
+ *   ready 상태에서 라벨이 없던 것(절차 누락)이라 실제 실패다.
  * - acceptance: check › Test이고 head가 인수 테스트 커밋 뒤 구현 전.
  * - real: 나머지.
  */
 export function classifyStep(
   job: string,
   step: string,
-  ctx: { pr: Pick<PrInfo, "state" | "labels"> | null; afterAcceptance: boolean },
+  ctx: {
+    pr: Pick<PrInfo, "state" | "labels"> | null;
+    afterAcceptance: boolean;
+    draftDeferred?: boolean;
+  },
 ): CiKind {
   if (/harness change label/i.test(step) || (job === "harness-change" && step === "(step 없음)")) {
+    if (ctx.draftDeferred) return "real";
     if (ctx.pr && (ctx.pr.labels.includes(HARNESS_LABEL) || ctx.pr.state === "open")) {
       return "label";
     }
@@ -463,7 +502,12 @@ export function classifyStep(
   return "real";
 }
 
-export function fetchCiFailures(gh: Gh, since: Date, prs: PrInfo[] | null = null): CiData | null {
+export function fetchCiFailures(
+  gh: Gh,
+  since: Date,
+  prs: PrInfo[] | null = null,
+  deferSince: Date | null = null,
+): CiData | null {
   const date = since.toISOString().slice(0, 10);
   const runs = pages(
     gh,
@@ -474,7 +518,11 @@ export function fetchCiFailures(gh: Gh, since: Date, prs: PrInfo[] | null = null
   const recent = (runs as Record<string, unknown>[]).filter(
     (run) => typeof run.created_at === "string" && Date.parse(run.created_at) >= since.getTime(),
   );
-  const data: CiData = { runs: [], truncated: recent.length > MAX_RUNS };
+  const data: CiData = {
+    runs: [],
+    truncated: recent.length > MAX_RUNS,
+    draftDeferSince: deferSince ? deferSince.toISOString() : null,
+  };
   const commitCache = new Map<number, CommitInfo[] | null>();
   const prCommits = (number: number) => {
     if (!commitCache.has(number)) {
@@ -518,7 +566,12 @@ export function fetchCiFailures(gh: Gh, since: Date, prs: PrInfo[] | null = null
         }
         steps.push({
           key: `${jobName} › ${name}`,
-          kind: classifyStep(jobName, name, { pr, afterAcceptance: after }),
+          kind: classifyStep(jobName, name, {
+            pr,
+            afterAcceptance: after,
+            draftDeferred:
+              deferSince !== null && Date.parse(str(run.created_at)) >= deferSince.getTime(),
+          }),
         });
       }
     }
@@ -847,6 +900,10 @@ export function buildReport(input: ReportInput): string {
     out.push(
       "",
       "예상된 실패: 라벨 단계는 PR이 `harness` 라벨을 가졌거나 아직 열려 있을 때(라벨 전 push), Test는 PR의 head가 `Acceptance: qa` 커밋 뒤·구현 커밋(feat·fix·refactor) 전일 때.",
+      "",
+      ci.draftDeferSince
+        ? `draft 판정 보류(#61)가 ${day(new Date(ci.draftDeferSince))}부터 main에 있다. 그 뒤 draft PR의 라벨 누락은 실패가 아니라 경고(어노테이션)라 이 집계에 없고, 그 뒤의 라벨 단계 실패는 ready 상태에서 라벨이 없던 것이라 실제 실패로 센다.`
+        : "draft 판정 보류(#61)는 아직 main에 없다. 라벨 단계 실패는 위 기준으로 나눈다.",
     );
   } else out.push(githubLine(ci));
   out.push("");
@@ -1038,7 +1095,7 @@ export async function runReport(options: {
     ...base,
     work,
     comments: fetchComments(gh, new Date(commentsSince), work?.prs),
-    ci: fetchCiFailures(gh, previous.start, work?.prs ?? null),
+    ci: fetchCiFailures(gh, previous.start, work?.prs ?? null, draftDeferSince(root)),
   });
 }
 

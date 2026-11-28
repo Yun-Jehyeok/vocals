@@ -1,4 +1,5 @@
 // harness-report 단위 테스트 (이슈 #17 하네스 6단계, #61 확장): 가짜 로그와 가짜 gh 응답으로 보고 내용을 확인한다.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import {
   classifyStep,
   countPmMarkers,
   countPmQuestions,
+  draftDeferSince,
   escapedOrigin,
   fetchCiFailures,
   fetchComments,
@@ -649,6 +651,81 @@ describe("harness-report: 이슈별 지표 (이슈 #61)", () => {
       issues: [issue(61, "c", { title: "측정", body: "b", labels: ["escaped"] })],
     });
     expect(fetchWork(fakeGh({}))).toBeNull();
+  });
+});
+
+describe("harness-report: draft 판정 보류 뒤의 CI 집계 (이슈 #61, PM 승인 A안)", () => {
+  it("판정 보류가 main에 들어간 뒤의 라벨 단계 실패는 ready에서 라벨이 없던 것이라 실제 실패", () => {
+    const open = { state: "open", labels: [] };
+    const step = (draftDeferred: boolean) =>
+      classifyStep("harness-change", "Harness change label", {
+        pr: open,
+        afterAcceptance: false,
+        draftDeferred,
+      });
+    expect(step(false)).toBe("label");
+    expect(step(true)).toBe("real");
+    // Test 분류는 그대로
+    expect(
+      classifyStep("check", "Test", { pr: open, afterAcceptance: true, draftDeferred: true }),
+    ).toBe("acceptance");
+  });
+
+  it("fetchCiFailures는 보류 시작 뒤의 실행만 새 기준으로 나누고 보고에 시작일을 적는다", () => {
+    const gh = fakeGh({
+      [`${R}/actions/runs?`]: {
+        workflow_runs: [
+          { id: 1, created_at: "2026-11-18T00:00:00Z", pull_requests: [{ number: 58 }] },
+          { id: 2, created_at: "2026-11-20T00:00:00Z", pull_requests: [{ number: 58 }] },
+        ],
+      },
+      [`${R}/actions/runs/`]: {
+        jobs: [{ name: "harness-change", conclusion: "failure", steps: [] }],
+      },
+    });
+    const since = new Date(NOW.getTime() - 7 * 86_400_000);
+    const prs = [pr(58, { state: "open" })];
+    const ci = fetchCiFailures(gh, since, prs, new Date("2026-11-19T00:00:00Z"));
+    expect(ci?.runs.map((run) => run.steps[0]?.kind)).toEqual(["label", "real"]);
+    const base = { now: NOW, days: 7, logs: readLogs(dir), ruleIds: {}, comments: "skip" as const };
+    expect(buildReport({ ...base, ci })).toContain(
+      "draft 판정 보류(#61)가 2026-11-19부터 main에 있다",
+    );
+    expect(buildReport({ ...base, ci: fetchCiFailures(gh, since, prs) })).toContain(
+      "draft 판정 보류(#61)는 아직 main에 없다",
+    );
+  });
+
+  it("draftDeferSince: main의 harness-guard.yml에 --draft가 들어간 merge 시각(first-parent)", () => {
+    const repo = mkdtempSync(join(tmpdir(), "defer-since-"));
+    const run = (args: string[], date?: string) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd: repo,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: date ? { ...process.env, GIT_COMMITTER_DATE: date } : process.env,
+      });
+    const file = join(repo, ".github", "workflows", "harness-guard.yml");
+    mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+    try {
+      run(["init", "-q", "-b", "main"]);
+      writeFileSync(file, '--labels "$PR_LABELS" --strict\n');
+      run(["add", "-A"]);
+      run(["commit", "-qm", "init"], "2026-11-10T00:00:00Z");
+      run(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+      expect(draftDeferSince(repo)).toBeNull();
+      run(["checkout", "-qb", "work"]);
+      writeFileSync(file, '--labels "$PR_LABELS" --draft "$PR_DRAFT" --strict\n');
+      run(["commit", "-qam", "chore: draft"], "2026-11-15T00:00:00Z");
+      run(["checkout", "-q", "main"]);
+      run(["merge", "-q", "--no-ff", "-m", "Merge", "work"], "2026-11-20T00:00:00Z");
+      run(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+      // 브랜치 커밋 시각(11-15)이 아니라 main에 merge된 시각
+      expect(draftDeferSince(repo)?.toISOString()).toBe("2026-11-20T00:00:00.000Z");
+      expect(draftDeferSince(join(repo, "없음"))).toBeNull();
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 
