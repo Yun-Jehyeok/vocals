@@ -1,7 +1,8 @@
 # supabase
 
 - `migrations/` — DB 스키마 (`docs/erd.md` 기준). 실제 Supabase에 그대로 적용할 수 있는 SQL이다.
-- `seed.sql` — 로컬 개발·테스트용 더미 데이터. 운영 DB에는 넣지 않는다.
+- `seed.sql` — 로컬 개발·테스트용 더미 데이터. 원격(테스트·운영) DB에는 넣지 않는다.
+- `config.toml` — Supabase CLI 설정. 테스트 프로젝트에 마이그레이션을 올릴 때만 쓴다(아래 "테스트 프로젝트에 올리기").
 - `tests/` — 권한(RLS)·스키마 테스트와 로컬 DB용 Supabase shim
 - `tests/acceptance/` — 이슈별 인수 테스트. QA만 쓴다(아래 "인수 테스트")
 - `scripts/` — 로컬 DB 명령, ERD 드리프트 센서
@@ -62,6 +63,69 @@ createdb vocals_local
 psql -v ON_ERROR_STOP=1 -d vocals_local -f supabase/tests/supabase-shim.sql \
   $(ls supabase/migrations/*.sql | sort | sed 's/^/-f /') -f supabase/seed.sql
 ```
+
+## 테스트 프로젝트에 올리기
+
+마이그레이션을 Supabase 테스트 프로젝트 `vocals-test`(ref `lzymeasuarakudsbsvpt`)에 올리는 방법. PM이 자기 컴퓨터에서 Supabase CLI로 한다(PM 결정 2026-11-23, 이슈 #59). 에이전트와 CI는 원격 DB에 올리지 않는다.
+
+- 올리는 것은 `migrations/`뿐이다. `seed.sql`(더미 데이터)은 올리지 않는다. 원격 seed는 다음 이슈에서 따로 정한다.
+- 운영 프로젝트는 아직 없다. 생기면 이 절차를 다시 정한다.
+
+### 준비물
+
+- 이 레포의 최신 main 체크아웃
+- Supabase CLI **3.x**(3.2.0으로 확인). 2.x와 3.x는 `db push`가 기본으로 고르는 대상이 다르므로 아래 명령은 3.x 기준이다.
+  - 설치하지 않고 쓰기(Node 22 이상): 아래 명령의 `supabase`를 `npx supabase@3.2.0`으로 바꿔 실행한다.
+  - macOS에 설치: `brew install supabase/tap/supabase`. 그 밖의 설치는 [Supabase CLI 문서](https://supabase.com/docs/guides/local-development/cli/getting-started)
+- Supabase 계정(테스트 프로젝트가 있는 조직)과 테스트 프로젝트의 DB 비밀번호. 비밀번호는 PM만 안다. CLI가 물을 때 터미널에만 입력하고, 명령 인자(`--password`)·파일·이슈·채팅 어디에도 적지 않는다.
+
+### 순서
+
+레포 루트에서 실행한다. `supabase/config.toml`이 있는 폴더를 CLI가 찾는다.
+
+```sh
+git checkout main && git pull
+supabase --version                                     # 3.x인지 확인
+
+supabase login                                         # 브라우저로 로그인. 토큰은 CLI가 내 컴퓨터에 저장한다
+supabase link --project-ref lzymeasuarakudsbsvpt       # 테스트 프로젝트에 연결. DB 비밀번호를 물으면 입력한다
+supabase migration list --remote                       # 연결 확인. Remote 칸이 비어 있어야 한다(처음 올릴 때)
+
+supabase db push --remote --dry-run                    # 올릴 마이그레이션 목록만 본다. 아직 바뀌는 것은 없다
+supabase db push --remote                              # 실제 적용. 목록을 다시 보여 주고 물으면 y
+supabase migration list --remote                       # Local과 Remote 칸이 모두 채워졌는지 확인
+```
+
+- `link`는 연결 정보를 `supabase/.temp/`에 저장한다(커밋하지 않는다, `.gitignore`). `migration list --remote`·`db push --remote`가 출력 첫머리에 보여 주는 대상 ref가 `lzymeasuarakudsbsvpt`가 아니면 멈춘다.
+- `link`가 "로컬 설정과 원격 설정이 다르다"는 안내를 보여도 `config.toml`을 고치거나 원격에 올리지 않는다. Postgres 메이저 버전이 17이 아니라는 안내가 나오면 팀장에게 알린다.
+- `--dry-run`에 아래 파일이 이 순서로 나와야 한다. 다르면 적용하지 말고 팀장에게 알린다. 다음에 올릴 때는 아직 올리지 않은 새 파일만 나온다.
+
+```
+20261119170000_accounts_trainers.sql
+20261121120000_active_user_edit_policies.sql
+20261121150000_products_payments_tickets.sql
+20261121180000_schedules_attendance.sql
+20261121210000_homework_videos_feedback.sql
+20261122090000_client_insert_authorization.sql
+20261122120000_chat_reviews_reports_notifications.sql
+20261122150000_user_restrictions.sql
+20261123120000_explicit_role_grants.sql
+```
+
+### 실패하면
+
+- 다시 시도하거나 다른 플래그를 붙이지 않는다. 마이그레이션 파일도 고치지 않는다.
+- 실패한 명령과 오류 메시지 전체, `supabase migration list --remote` 결과를 팀장에게 보낸다(비밀번호는 빼고).
+- 마이그레이션은 파일마다 따로 적용된다. 실패한 파일 앞의 파일은 적용되어 원격 이력에 남고, 실패한 파일은 남지 않는다. 고친 뒤 `db push --remote`를 다시 하면 남은 파일만 올라간다. 고치는 것은 새 마이그레이션 PR로 한다.
+
+### 하지 말 것
+
+- `supabase db reset --remote`(2.x는 `--linked`): 원격 DB를 지우고 처음부터 다시 만든다.
+- 운영 프로젝트(생기면)나 다른 프로젝트에 `link`. 올리기 전에 연결된 ref를 확인한다.
+- 원격에 seed 넣기: `db push --include-seed`, `supabase seed`, 대시보드 SQL 편집기에 `seed.sql` 붙여넣기. `config.toml`의 `[db.seed] enabled = false`는 이를 막지 못한다(CLI 3.x의 `--include-seed`는 이 값을 무시한다). 이 플래그·명령을 쓰지 않는 것만이 막는 방법이다.
+- `supabase config push`: `config.toml`의 최소 설정으로 원격의 Auth 등 설정을 덮어쓴다.
+- 팀장과 정하지 않은 `supabase migration repair`, `db pull`, `db push --include-all`: 원격의 마이그레이션 이력이나 로컬 파일을 바꾼다.
+- 대시보드(테이블 편집기·SQL 편집기)에서 스키마를 직접 바꾸기. 스키마는 `migrations/`의 새 파일로만 바꾼다.
 
 ## 권한 테스트
 
@@ -140,7 +204,7 @@ describeRlsMatrix({
 ## 새 테이블을 만들 때
 
 1. `migrations/`에 새 파일(`<YYYYMMDDHHMMSS>_<이름>.sql`)을 만든다. 기존 파일은 고치지 않는다.
-2. 테이블마다 RLS를 켜고, `anon`·`authenticated`의 기본 권한을 `revoke all`로 회수한 뒤 필요한 컬럼만 `grant`한다. Supabase는 public 테이블에 기본으로 모든 권한을 준다.
+2. 테이블마다 RLS를 켜고, `anon`·`authenticated`의 권한을 `revoke all`로 회수한 뒤 필요한 컬럼만 `grant`한다. `20261123120000_explicit_role_grants.sql`부터 새 테이블에는 `service_role`에만 기본 권한이 가지만, 프로젝트 설정과 상관없이 같게 하려고 회수는 계속 쓴다. 클라이언트가 `nextval`을 써야 하는 시퀀스가 생기면 그 시퀀스 권한도 명시한다.
 3. 정책·트리거에서 쓰는 함수는 `private` 스키마에 둔다(API로 노출되지 않는다).
 4. `tests/`에 허용되는 경우와 막히는 경우를 각각 1개 이상 테스트한다.
 
@@ -151,6 +215,7 @@ describeRlsMatrix({
 - `auth.users`는 `id`, `email`, `created_at`만 있다. 실제 테이블은 컬럼이 더 많고 Supabase Auth가 행을 만든다.
 - `auth.uid()`, `auth.role()`, `auth.jwt()`는 `request.jwt.claims` 설정값만 읽는다. 실제로는 PostgREST가 JWT 서명을 검증한 뒤 넣는다.
 - 역할은 `anon`, `authenticated`, `service_role`(RLS 무시)만 있다. `authenticator`, `supabase_admin` 등은 없다.
-- 기본 권한은 Supabase처럼 public 스키마의 새 테이블·시퀀스·함수에 세 역할 모두 권한을 준다.
+- 기본 권한은 Supabase의 옛 방식대로 public 스키마의 새 테이블·시퀀스·함수에 세 역할 모두 권한을 준다. Supabase는 2026-10-30부터 모든 프로젝트에서 새 테이블·시퀀스에 이 기본 권한을 주지 않는다([changelog #45329](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically)). `tests/role-grants.test.ts`가 두 방식에서 마이그레이션 적용 결과 권한이 같은지 확인한다.
+- 실제 Supabase에서 마이그레이션은 superuser가 아닌 `postgres` 역할로 적용된다. 로컬(PGlite)은 superuser로 적용한다. 이슈 #59에서 Supabase와 비슷하게 역할을 나눈 Postgres 16에 `postgres`(superuser 아님)로 마이그레이션 전체를 적용해 확인했다(자동 테스트는 아니다).
 - PGlite는 Postgres 18이다. Supabase 프로젝트의 Postgres 버전(15·17)과 다를 수 있다. 같은 SQL을 Postgres 16에서도 적용해 확인했다.
 - PostgREST(REST API)는 거치지 않고 SQL을 직접 실행한다. 그래서 `select=*` 같은 API 동작 차이는 테스트하지 않는다.

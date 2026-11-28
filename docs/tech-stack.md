@@ -151,6 +151,32 @@ docs/
 - 관리자 권한 키(service role key)는 서버 함수에서만 쓰고, 앱과 운영자 웹 코드에는 절대 넣지 않는다.
 - 연습 영상(얼굴이 나옴)은 해외 서비스(Mux)에 저장되므로, 개인정보 처리방침에 해외 이전 사실을 적는다. Supabase 프로젝트 리전은 서울로 둘 수 있는지 확인한다.
 
+### 3.12 앱 설정 값과 로그인 연결 (팀장 결정 2026-11-23, #56)
+
+앱(`apps/mobile`)이 Supabase와 소셜 로그인에 붙는 방법이다. 여기 값은 모두 공개 값이다.
+
+- **환경 변수**: 앱은 아래 두 값만 읽는다. Expo는 앱 폴더의 `.env`에서 `EXPO_PUBLIC_`로 시작하는 변수를 빌드할 때 코드에 넣으므로, 이 이름에는 공개 값만 둔다. 비밀 키(service role key, `sb_secret_…`)를 이 이름으로 두면 앱에 그대로 들어간다(3.11).
+
+  | 이름 | 값 |
+  |---|---|
+  | `EXPO_PUBLIC_SUPABASE_URL` | Supabase 프로젝트 URL (`https://<프로젝트 ref>.supabase.co`) |
+  | `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (`sb_publishable_…`) |
+
+- **`.env` 다루기**: 키 이름은 `.env.example`에만 적고, 값이 든 `apps/mobile/.env`는 사람이 만든다(CLAUDE.md 보안). 값이 없으면 앱은 대체 값 없이 설정 오류 화면을 보여 준다.
+- **로그인과 `users` 행**: 로그인·세션은 Supabase Auth만 쓴다. `users` 행은 본인인증(C-03) 뒤에 만든다(`docs/erd.md` 2장).
+- **소셜 로그인 방식**: Supabase `signInWithOAuth` + 기기 웹 브라우저 인증 세션 + PKCE. 로그인이 끝나면 앱 scheme 주소로 앱에 돌아와 코드를 세션으로 바꾼다.
+- **앱 scheme**: `vocals`. 돌아오는 주소는 `vocals://auth/callback`.
+- **Supabase Auth Redirect URLs**(대시보드 Authentication → URL Configuration)
+
+  | 주소 | 쓰임 | 넣는 프로젝트 |
+  |---|---|---|
+  | `exp://**` | Expo Go 실기기 테스트. 돌아오는 주소가 `exp://<컴퓨터 IP>:8081/--/auth/callback`처럼 네트워크마다 바뀐다 | 테스트 프로젝트만 |
+  | `vocals://auth/callback` | 개발용 빌드·출시 앱 | 테스트·운영 |
+
+  허용 목록에 없는 주소로 돌아오려 하면 Supabase가 Site URL로 보내 앱으로 돌아오지 못한다.
+- **소셜 로그인 공급자 콘솔**: 카카오 디벨로퍼스의 Redirect URI는 Supabase 콜백(`https://<프로젝트 ref>.supabase.co/auth/v1/callback`)이다. 앱 scheme이 아니다.
+- **세션 저장**: 기기에 평문으로 두지 않는다. 암호화 키는 `expo-secure-store`(기기 보안 저장소), 암호화한 세션은 AsyncStorage에 둔다(SecureStore 값 크기 한도 때문). 세션 자동 갱신은 앱이 앞에 있을 때만 돈다. 토큰·사용자 정보는 로그에 남기지 않는다.
+
 ## 4. 검토한 대안: Express 직접 구축
 
 Express + PostgreSQL(AWS RDS) + Cloudflare R2 + Mux로 백엔드를 직접 만드는 안과 비교했고, 1단계는 Supabase로 가기로 했다.

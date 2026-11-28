@@ -36,3 +36,8 @@
 - RNTL 14 `fireEvent.press`는 핸들러가 돌려준 Promise까지 기다린다. 대역이 붙잡아 둔 로딩 상태는 `void press` → 마이크로태스크 20번 → `act`로 흘려보낸다. 열린 `act` 안에서 `setTimeout`을 기다리면 멈춘다(#56).
 - jest-expo에서 `AppState.addEventListener`는 이미 jest.fn이다. spyOn한 뒤 원래 함수를 부르면 무한 재귀가 된다(#56).
 - QA 훅은 `*.test.*`만 허용했다(0.7.0 이전). 테스트 헬퍼·대역은 테스트 파일 안에 두고, jest.mock 팩토리가 부르는 함수 이름은 `mock`으로 시작, 대역 상태는 globalThis에 둔다(#56).
+- 역할·기본 권한 검증은 `/usr/lib/postgresql/16/bin`에 임시 클러스터를 만들어 한다. root로는 initdb·pg_ctl이 안 되니 `runuser -u postgres`로 돌린다. superuser는 `supabase_admin`, `postgres`는 superuser가 아니게 만들고, 기본 권한은 `alter default privileges for role postgres`로 건다(#59).
+- 기본 권한을 바꾸는 변경은 /tmp 복사본에서 shim의 기본 권한 줄을 빼고 인수 테스트 전체를 돌린다. 대조군(그 마이그레이션 제외)이 실패하는지도 함께 본다(#59).
+- 설정 파일의 "안전장치" 주석은 외부 도구 문서로 확인한다. 예: Supabase CLI v3에서 `--include-seed`가 `[db.seed] enabled = false`를 무시한다(#59).
+- 앱 인수 테스트에서 재시작을 흉내 내며 라이브러리를 고정할 때, jest-expo 프리셋이 doMock으로 대역을 넣은 모듈(`expo-modules-core`)은 `jest.requireActual`이 아니라 `jest.requireMock`으로 고정한다(#56).
+- 앱 판정 때는 로컬 `pnpm check`만 보지 말고 CI `check` 로그도 본다. CI가 느려 jest 기본 5s 한도를 넘는 렌더 테스트가 있다(#56).

@@ -30,3 +30,13 @@
 - 앱 테스트는 RNTL 14라 `render`·`renderRouter`가 비동기다. `await` 없이 부르면 "`render` function has not been called"로 실패한다(#56).
 - 이 환경은 프록시가 api.expo.dev를 막아 `expo install --check`가 실패한다. `EXPO_OFFLINE=1`로 돌리고, 버전은 `npm pack expo@<버전>`의 `bundledNativeModules.json`에서 읽는다(#56).
 - 개발의 스모크·단위 테스트 이름에 요구사항 ID를 넣으면 req-trace가 기준선에서 그 ID를 지우라고 실패한다. ID 추적은 QA 인수 테스트에 맡긴다(#56).
+- Supabase CLI 3.x는 원격 반영·마이그레이션 목록·초기화 명령의 기본 대상이 로컬이다. 원격은 `--remote`를 붙인다(2.x는 `--linked`가 기본이었다)(#59).
+- Supabase는 2026-10-30부터 public의 새 테이블·시퀀스에 anon·authenticated·service_role 기본 권한을 주지 않는다. 새 테이블은 클라이언트 권한을 명시 grant한다. service_role 기본 권한은 20261123120000이 복원한다(#59).
+- 개발 훅은 `pnpm` 명령과 인수 테스트 경로가 한 Bash에 같이 있으면 막는다. 명령을 나눈다(#59).
+- 훅은 로컬 DB를 대상으로 해도 Supabase CLI의 원격 반영 명령을 막는다(#59).
+- 개발 역할에서 `pnpm test <이름>`에 `-t` 같은 플래그를 붙이면 보호 경로 글자와 함께 막힌다. 위치 인자로만 거르고(`pnpm test 56-app > /tmp/x.log`), 결과는 따로 grep한다(#56).
+- jest-expo는 `expo-modules-core`를 doMock해 네이티브 모듈 대역을 준다. `resetModules` 뒤 실제 모듈을 다시 넣으면 expo-crypto 등이 "Cannot find native module"로 실패한다(#56).
+- AsyncStorage 2.x는 jest에서 import만 해도 예외가 난다. 앱을 렌더하는 개발 테스트는 공식 대역(`…/jest/async-storage-mock`)을 `jest.mock`으로 넣는다(#56).
+- Expo SDK 58은 URL·URLSearchParams 표준 구현을 전역에 넣는다. `react-native-url-polyfill`은 필요 없다(#56).
+- PR이 main과 충돌하면(`mergeable_state: dirty`) GitHub가 pull_request CI를 돌리지 않고 pull_request_target(Harness guard)만 돈다. push 뒤 CI가 안 보이면 mergeable_state부터 본다(#56).
+- CI는 로컬보다 느려 jest 기본 5초 한도를 넘는 렌더 테스트가 있다. 앱 렌더 테스트는 파일 안에 `jest.setTimeout(30_000)`을 둔다(#56).

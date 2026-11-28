@@ -27,7 +27,7 @@
 apps/mobile/       Expo 앱 (학생·트레이너·운영자). 실행 방법은 apps/mobile/README.md
 apps/admin/        Next.js 운영자 웹 — 아직 없음
 packages/shared/   도메인 타입·규칙 (앱·웹·서버 함수가 함께 씀)
-supabase/          migrations/, functions/ — 아직 없음
+supabase/          migrations/, tests/, seed.sql. 테스트 프로젝트에 올리는 방법은 supabase/README.md (functions/ — 아직 없음)
 docs/              기획 문서
 plugins/vocals-team/  역할 에이전트(기획·디자인·개발·QA)와 팀장 절차 스킬
 .claude/rules/     팀 운영 규칙 등 항상 읽히는 규칙
