@@ -400,7 +400,7 @@ export function parseIssueFilter(text: string): number[] {
 
 // ---------- CI ----------
 
-export type CiKind = "label" | "acceptance" | "real";
+export type CiKind = "label" | "acceptance" | "repro" | "real";
 
 export interface CiStep {
   /** "job › step" */
@@ -455,6 +455,27 @@ export function draftDeferSince(cwd: string, ref = "origin/main"): Date | null {
 export interface CommitInfo {
   sha: string;
   message: string;
+  /** 커밋 시각(committer date). 모르면 "" */
+  date?: string;
+}
+
+const TEST_COMMIT = /^test(\([^)]*\))?!?:/;
+
+/**
+ * head 커밋이 "QA 반려 뒤의 QA 재현 테스트 커밋"인가(#61 QA 반려 F3, QA 추천 A).
+ * head가 `test:` 커밋이고(트레일러 없음도 포함) 그 PR에 그 커밋보다 먼저 쓴 `[QA 반려]`가 있으면 참.
+ * 재현 테스트는 버그를 보이려고 일부러 실패하므로 그때의 Test 실패는 예상된 것이다.
+ */
+export function qaReproAfterRejection(
+  commits: CommitInfo[],
+  headSha: string,
+  rejectedAt: string[],
+): boolean {
+  const head = commits.find((c) => c.sha === headSha) ?? commits.at(-1);
+  if (!head || !TEST_COMMIT.test(head.message)) return false;
+  const at = Date.parse(head.date ?? "");
+  if (Number.isNaN(at)) return false;
+  return rejectedAt.some((ts) => Date.parse(ts) < at);
 }
 
 export const ACCEPTANCE_TRAILER = /^Acceptance:\s*qa\s*$/im;
@@ -483,6 +504,7 @@ export function afterAcceptance(commits: CommitInfo[], headSha: string): boolean
  *   draftDeferred(#61: draft 판정 보류가 main에 들어간 뒤의 실행)면 draft는 실패하지 않으므로, 라벨 단계 실패는
  *   ready 상태에서 라벨이 없던 것(절차 누락)이라 실제 실패다.
  * - acceptance: check › Test이고 head가 인수 테스트 커밋 뒤 구현 전.
+ * - repro: check › Test이고 head가 `[QA 반려]` 뒤의 QA 재현 `test:` 커밋(#61 F3).
  * - real: 나머지.
  */
 export function classifyStep(
@@ -491,6 +513,7 @@ export function classifyStep(
   ctx: {
     pr: Pick<PrInfo, "state" | "labels"> | null;
     afterAcceptance: boolean;
+    qaRepro?: boolean;
     draftDeferred?: boolean;
   },
 ): CiKind {
@@ -502,14 +525,19 @@ export function classifyStep(
     return "real";
   }
   if (job === "check" && step === "Test" && ctx.afterAcceptance) return "acceptance";
+  if (job === "check" && step === "Test" && ctx.qaRepro) return "repro";
   return "real";
 }
 
+/**
+ * comments: `[QA 반려]` 시각을 PR별로 찾는 데 쓴다(#61 F3). null이면 재현 커밋 분류를 하지 않는다.
+ */
 export function fetchCiFailures(
   gh: Gh,
   since: Date,
   prs: PrInfo[] | null = null,
   deferSince: Date | null = null,
+  comments: Comment[] | null = null,
 ): CiData | null {
   const date = since.toISOString().slice(0, 10);
   const runs = pages(
@@ -537,6 +565,12 @@ export function fetchCiFailures(
           : (list as Record<string, unknown>[]).map((c) => ({
               sha: str(c.sha),
               message: str((c.commit as Record<string, unknown> | undefined)?.message),
+              date: str(
+                (
+                  (c.commit as Record<string, unknown> | undefined)?.committer as
+                    Record<string, unknown> | undefined
+                )?.date,
+              ),
             })),
       );
     }
@@ -562,16 +596,22 @@ export function fetchCiFailures(
       for (const name of names) {
         const jobName = String(job.name);
         let after = false;
+        let repro = false;
         if (jobName === "check" && name === "Test" && prNumber !== null) {
           const commits = prCommits(prNumber);
           if (commits === null) return null;
           after = afterAcceptance(commits, str(run.head_sha));
+          const rejectedAt = (comments ?? [])
+            .filter((c) => c.ref === `#${prNumber}` && isQaRejection(c.body))
+            .map((c) => c.created);
+          repro = qaReproAfterRejection(commits, str(run.head_sha), rejectedAt);
         }
         steps.push({
           key: `${jobName} › ${name}`,
           kind: classifyStep(jobName, name, {
             pr,
             afterAcceptance: after,
+            qaRepro: repro,
             draftDeferred:
               deferSince !== null && Date.parse(str(run.created_at)) >= deferSince.getTime(),
           }),
@@ -778,8 +818,10 @@ function compareRows(current: Summary, previous: Summary): string[] {
 const KIND_LABEL: Record<CiKind, string> = {
   label: "라벨 단계",
   acceptance: "인수 테스트 직후 Test",
+  repro: "QA 반려 뒤 재현 테스트",
   real: "실제 실패",
 };
+const EXPECTED_KINDS: CiKind[] = ["label", "acceptance", "repro"];
 
 export function buildReport(input: ReportInput): string {
   const { now, logs, ruleIds, comments, ci } = input;
@@ -873,36 +915,30 @@ export function buildReport(input: ReportInput): string {
     out.push(
       `실패한 실행 ${runs.length}개${ci.truncated ? ` (앞 ${MAX_RUNS}개만 봄)` : ""} — 예상된 실패만 있는 실행 ${expected.length}개, 실제 실패가 있는 실행 ${runs.length - expected.length}개`,
       "",
-      `실패 step ${steps.length}건 — 라벨 단계 ${kindCount("label")}건, 인수 테스트 직후 Test ${kindCount("acceptance")}건(예상된 실패), 실제 실패 ${kindCount("real")}건`,
+      `실패 step ${steps.length}건 — 라벨 단계 ${kindCount("label")}건, 인수 테스트 직후 Test ${kindCount("acceptance")}건, QA 반려 뒤 재현 테스트 ${kindCount("repro")}건(여기까지 예상된 실패), 실제 실패 ${kindCount("real")}건`,
     );
     const table = new Map<string, Record<CiKind, number>>();
     for (const step of steps) {
-      const row = table.get(step.key) ?? { label: 0, acceptance: 0, real: 0 };
+      const row = table.get(step.key) ?? { label: 0, acceptance: 0, repro: 0, real: 0 };
       row[step.kind]++;
       table.set(step.key, row);
       if (step.kind === "real") realSteps.set(step.key, (realSteps.get(step.key) ?? 0) + 1);
     }
     if (table.size > 0) {
       out.push("", "| job › 실패 step | 예상된 실패 | 실제 실패 |", "| --- | --- | --- |");
-      const total = (r: Record<CiKind, number>) => r.label + r.acceptance + r.real;
+      const total = (r: Record<CiKind, number>) => r.label + r.acceptance + r.repro + r.real;
       for (const [key, row] of [...table.entries()].sort(
         (a, b) => total(b[1]) - total(a[1]) || a[0].localeCompare(b[0]),
       )) {
-        const expectedText =
-          row.label + row.acceptance === 0
-            ? "0"
-            : [
-                row.label ? `${row.label} (${KIND_LABEL.label})` : "",
-                row.acceptance ? `${row.acceptance} (${KIND_LABEL.acceptance})` : "",
-              ]
-                .filter(Boolean)
-                .join(", ");
-        out.push(`| ${key} | ${expectedText} | ${row.real} |`);
+        const parts = EXPECTED_KINDS.filter((kind) => row[kind] > 0).map(
+          (kind) => `${row[kind]} (${KIND_LABEL[kind]})`,
+        );
+        out.push(`| ${key} | ${parts.length > 0 ? parts.join(", ") : "0"} | ${row.real} |`);
       }
     }
     out.push(
       "",
-      "예상된 실패: 라벨 단계는 PR이 `harness` 라벨을 가졌거나 아직 열려 있을 때(라벨 전 push), Test는 PR의 head가 `Acceptance: qa` 커밋 뒤·구현 커밋(feat·fix·refactor) 전일 때.",
+      "예상된 실패: 라벨 단계는 PR이 `harness` 라벨을 가졌거나 아직 열려 있을 때(라벨 전 push). Test는 PR의 head가 `Acceptance: qa` 커밋 뒤·구현 커밋(feat·fix·refactor) 전일 때, 또는 head가 그 PR의 `[QA 반려]` 뒤에 올린 `test:` 커밋(QA 재현 테스트)일 때.",
       "",
       ci.draftDeferSince
         ? `draft 판정 보류(#61)가 ${day(new Date(ci.draftDeferSince))}부터 main에 있다. 그 뒤 draft PR의 라벨 누락은 실패가 아니라 경고(어노테이션)라 이 집계에 없고, 그 뒤의 라벨 단계 실패는 ready 상태에서 라벨이 없던 것이라 실제 실패로 센다.`
@@ -1094,11 +1130,13 @@ export async function runReport(options: {
       if (created) commentsSince = Math.min(commentsSince, Date.parse(created));
     }
   }
+  const comments = fetchComments(gh, new Date(commentsSince), work?.prs);
   return buildReport({
     ...base,
     work,
-    comments: fetchComments(gh, new Date(commentsSince), work?.prs),
-    ci: fetchCiFailures(gh, previous.start, work?.prs ?? null, draftDeferSince(root)),
+    comments,
+    // [QA 반려] 시각으로 QA 재현 커밋 뒤의 Test 실패를 예상된 실패로 나눈다(#61 F3)
+    ci: fetchCiFailures(gh, previous.start, work?.prs ?? null, draftDeferSince(root), comments),
   });
 }
 

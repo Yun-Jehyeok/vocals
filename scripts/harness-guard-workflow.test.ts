@@ -57,11 +57,29 @@ describe("harness-guard.yml 보안 규칙 (이슈 #17 2단계 후속)", () => {
     expect(code).toMatch(/persist-credentials: false/);
   });
 
-  it("권한은 contents: read뿐이고 시크릿·토큰·캐시를 쓰지 않는다", () => {
+  it("권한은 contents: read와 pull-requests: read뿐이고 시크릿·캐시를 쓰지 않는다 (#61)", () => {
     const permissions = /^permissions:\n((?:[ \t]+.+\n)+)/m.exec(code)?.[1] ?? "";
-    expect(permissions.trim()).toBe("contents: read");
+    expect(
+      permissions
+        .trim()
+        .split("\n")
+        .map((line) => line.trim()),
+    ).toEqual(["contents: read", "pull-requests: read"]);
     expect(code).not.toMatch(/permissions:\s*write|:\s*write\b/);
     expect(code).not.toMatch(/secrets\.|GITHUB_TOKEN|\bcache:/);
+  });
+
+  it("토큰은 PR 상태를 읽는 단계의 env에만 있고, 그 단계는 gh api로 읽기만 한다 (#61 QA 반려 F1)", () => {
+    expect(code.match(/\$\{\{ github\.token \}\}/g)).toHaveLength(1);
+    const step = /- name: Read PR state[^\n]*\n((?:[ \t]+.*\n|\n)+?)(?=\s*- (?:name|uses):)/.exec(
+      code,
+    )?.[1];
+    expect(step).toBeDefined();
+    expect(step).toMatch(/GH_TOKEN: \$\{\{ github\.token \}\}/);
+    const run = runBlocks().find((block) => block.includes("gh api")) ?? "";
+    expect(run).toMatch(/gh api "repos\/\$\{REPO\}\/pulls\/\$\{PR_NUMBER\}" --jq/);
+    expect(run).not.toMatch(/\s(-X|--method|-f|-F|--field|--raw-field|--input)\s/);
+    expect(runBlocks().filter((block) => block.includes("gh "))).toHaveLength(1);
   });
 });
 
@@ -75,17 +93,26 @@ describe("draft PR 라벨 판정 보류 (이슈 #61, PM 승인 2026-11-28 A안)"
     expect(ci).toMatch(/types: \[[^\]]*labeled[^\]]*unlabeled/);
   });
 
-  it("draft 여부는 env로 넘기고 --labels·--strict와 함께 부른다(라벨 검사는 지우지 않는다)", () => {
+  it("draft 여부·라벨은 payload가 아니라 실행 시점 PR 상태(steps.pr)로 넘기고 --strict와 함께 부른다 (QA 반려 F1)", () => {
     for (const text of [code, ci]) {
-      expect(text).toMatch(/PR_DRAFT: \$\{\{ github\.event\.pull_request\.draft \}\}/);
+      expect(text).toMatch(/- name: Read PR state \(실행 시점\)\n\s+id: pr\n/);
+      expect(text).toMatch(/PR_DRAFT: \$\{\{ steps\.pr\.outputs\.draft \}\}/);
+      expect(text).toMatch(/PR_LABELS: \$\{\{ steps\.pr\.outputs\.labels \}\}/);
+      // 이벤트 payload의 draft·라벨은 쓰지 않는다(늦게 큐에 들어간 실행이 예전 상태로 판정하는 틈)
+      expect(text).not.toMatch(/github\.event\.pull_request\.(draft|labels)/);
       expect(text).toMatch(/--labels "\$PR_LABELS" --draft "\$PR_DRAFT" --strict/);
       expect(text).toMatch(/- name: Harness change label/);
+      // 읽지 못하면 ready·라벨 없음(강제 쪽)
+      expect(text).toMatch(/\*\)\n\s+echo "::warning[^\n]*\n\s+draft=false\n\s+labels=""/);
     }
+    const ciPermissions = /^permissions:\n((?:[ \t]+.+\n)+)/m.exec(ci)?.[1] ?? "";
+    expect(ciPermissions.trim().split(/\n\s*/)).toEqual(["contents: read", "pull-requests: read"]);
   });
 
-  it("팀장 스킬에 ready 전환 뒤 시작된 실행을 확인하고 merge를 요청하는 규칙이 있다", () => {
+  it("팀장 스킬: ready 뒤에 시작됐고 판정 보류 경고가 없는 통과를 확인하고 merge를 요청한다", () => {
     const skill = read("../plugins/vocals-team/skills/team-lead/SKILL.md");
-    expect(skill).toMatch(/ready로 바꾼 뒤 \*\*그 뒤에 시작된\*\* `harness-change`/);
+    expect(skill).toMatch(/ready로 바꾼 \*\*뒤에 시작된\*\* `harness-change`/);
+    expect(skill).toMatch(/\*\*"판정 보류" 경고가 없다\*\*/);
     expect(skill).toContain("merge 근거가 아니다");
   });
 });

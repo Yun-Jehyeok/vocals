@@ -24,6 +24,7 @@ import {
   parseIssueFilter,
   periodsOf,
   prIssueRefs,
+  qaReproAfterRejection,
   readLogs,
   runReport,
   scopeIssues,
@@ -371,7 +372,7 @@ describe("harness-report: CI 실패 — 예상된 실패와 실제 실패 (이�
       "실패한 실행 4개 — 예상된 실패만 있는 실행 2개, 실제 실패가 있는 실행 2개",
     );
     expect(report).toContain(
-      "실패 step 6건 — 라벨 단계 2건, 인수 테스트 직후 Test 1건(예상된 실패), 실제 실패 3건",
+      "실패 step 6건 — 라벨 단계 2건, 인수 테스트 직후 Test 1건, QA 반려 뒤 재현 테스트 0건(여기까지 예상된 실패), 실제 실패 3건",
     );
     expect(report).toContain("| check › Test | 1 (인수 테스트 직후 Test) | 1 |");
     expect(report).toContain("| check › Harness change label | 1 (라벨 단계) | 1 |");
@@ -422,6 +423,72 @@ describe("harness-report: CI 실패 — 예상된 실패와 실제 실패 (이�
     expect(label(null)).toBe("real");
     expect(classifyStep("check", "Test", { pr: null, afterAcceptance: true })).toBe("acceptance");
     expect(classifyStep("check", "Lint", { pr: null, afterAcceptance: true })).toBe("real");
+  });
+
+  it("qaReproAfterRejection: head가 test: 커밋이고 그 전에 [QA 반려]가 있어야 참 (#61 QA 반려 F3)", () => {
+    const commits = [
+      { sha: "f", message: "fix: #48 고침", date: "2026-11-22T01:00:00Z" },
+      { sha: "t", message: "test: #48 반려 재현", date: "2026-11-22T03:00:00Z" },
+    ];
+    expect(qaReproAfterRejection(commits, "t", ["2026-11-22T02:00:00Z"])).toBe(true);
+    expect(qaReproAfterRejection(commits, "t", ["2026-11-22T04:00:00Z"])).toBe(false); // 반려가 뒤
+    expect(qaReproAfterRejection(commits, "t", [])).toBe(false);
+    expect(qaReproAfterRejection(commits, "f", ["2026-11-22T00:00:00Z"])).toBe(false); // head가 fix:
+    expect(
+      qaReproAfterRejection([{ sha: "s", message: "test(shared): 재현" }], "s", [
+        "2026-11-22T00:00:00Z",
+      ]),
+    ).toBe(false); // 시각을 모르면 거짓
+  });
+
+  it("[QA 반려] 뒤 QA 재현 test: 커밋이 head인 Test 실패는 예상된 실패(repro)로 다시 나눈다 (F3)", () => {
+    const gh = fakeGh({
+      [`${R}/actions/runs?`]: {
+        workflow_runs: [
+          {
+            id: 7,
+            created_at: "2026-11-20T03:10:00Z",
+            head_sha: "t",
+            pull_requests: [{ number: 50 }],
+          },
+          {
+            id: 8,
+            created_at: "2026-11-20T01:10:00Z",
+            head_sha: "f",
+            pull_requests: [{ number: 50 }],
+          },
+        ],
+      },
+      [`${R}/actions/runs/`]: {
+        jobs: [{ name: "check", conclusion: "failure", steps: [failing("Test")] }],
+      },
+      [`${R}/pulls/50/commits`]: [
+        {
+          sha: "f",
+          commit: { message: "fix: #48 고침", committer: { date: "2026-11-20T01:00:00Z" } },
+        },
+        {
+          sha: "t",
+          commit: { message: "test: #48 재현", committer: { date: "2026-11-20T03:00:00Z" } },
+        },
+      ],
+    });
+    const rejection = { body: "[QA 반려] 2차", ref: "#50", created: "2026-11-20T02:00:00Z" };
+    const other = { body: "[QA 반려] 다른 PR", ref: "#51", created: "2026-11-20T00:00:00Z" };
+    const ci = fetchCiFailures(gh, since, prs, null, [rejection, other]);
+    expect(ci?.runs.map((run) => run.steps[0]?.kind)).toEqual(["repro", "real"]);
+    // 반려 댓글을 모르면 예전처럼 실제 실패
+    expect(fetchCiFailures(gh, since, prs, null, [other])?.runs[0]?.steps[0]?.kind).toBe("real");
+    const report = buildReport({
+      now: NOW,
+      days: 7,
+      logs: readLogs(dir),
+      ruleIds: {},
+      comments: "skip",
+      ci,
+    });
+    expect(report).toContain("| check › Test | 1 (QA 반려 뒤 재현 테스트) | 1 |");
+    expect(report).toContain("예상된 실패만 있는 실행 1개, 실제 실패가 있는 실행 1개");
   });
 
   it("PR 커밋 목록을 못 읽으면 CI 절을 조회 실패로 둔다(부분 결과 없음)", () => {

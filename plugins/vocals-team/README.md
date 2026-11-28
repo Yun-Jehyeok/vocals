@@ -60,7 +60,7 @@ Bash 해석(`lib/shell.mjs`):
 - 훅 단위 테스트: `scripts/plugin-hooks.test.ts`, `scripts/session-context.test.ts`, `scripts/hook-log.test.ts`(`pnpm test`). 규칙을 바꾸면 표에 줄을 더한다.
 - 차단 메시지의 "왜"는 대상에 맞춘다(예: QA가 문서 → 기획 담당, seed → 개발 담당, 하네스 → 팀장 라벨).
 - 로컬 `.claude/settings.json`의 PreToolUse 훅은 이 스크립트를 레포 경로(`$CLAUDE_PROJECT_DIR/plugins/vocals-team/hooks/`)에서 직접 부른다. 그래서 로컬은 항상 작업 트리의 최신 규칙을 쓴다. 플러그인 훅(마켓플레이스 캐시)과 둘 다 돌아도 판정이 같다.
-- 이 디렉터리를 바꾸는 PR은 `harness` 라벨이 있어야 CI를 통과한다(`scripts/check-harness-change.ts`). draft PR은 라벨이 없어도 "판정 보류" 경고로 두고 ready가 되면 강제한다(#61).
+- 이 디렉터리를 바꾸는 PR은 `harness` 라벨이 있어야 CI를 통과한다(`scripts/check-harness-change.ts`). draft PR은 라벨이 없어도 "판정 보류" 경고로 두고 ready가 되면 강제한다(#61). draft 여부·라벨은 실행 시점의 PR 상태(API)로 정한다.
 - 훅이 클라우드 스레드에서 실제로 도는지는 플러그인을 켠 새 세션에서 QA가 실측한다(#17 2단계 검증).
 
 ## 차단 로그 (`lib/log.mjs`, 이슈 #17 6단계)
