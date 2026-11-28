@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
@@ -16,6 +17,11 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // 앱(Expo): 훅 규칙
+    files: ["apps/mobile/**/*.{ts,tsx}"],
+    ...reactHooks.configs.flat.recommended,
+  },
   {
     languageOptions: {
       globals: { ...globals.node },

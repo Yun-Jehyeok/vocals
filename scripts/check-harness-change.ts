@@ -28,10 +28,13 @@ export const HARNESS_PATHS = [
   "pnpm-workspace.yaml", // 어떤 패키지의 테스트가 도는지
 ] as const;
 /**
- * 위치와 상관없이 하네스인 파일: 테스트 범위를 정하는 vitest 설정(include를 줄이면 테스트가 조용히 빠진다).
- * 새로 만든 설정도 잡는다. 예: packages/shared/vitest.config.ts, supabase/vitest.config.ts
+ * 위치와 상관없이 하네스인 파일: 테스트 범위를 정하는 vitest·jest 설정(include·testMatch를 줄이면 테스트가 조용히 빠진다).
+ * 새로 만든 설정도 잡는다. 예: packages/shared/vitest.config.ts, supabase/vitest.config.ts, apps/mobile/jest.config.js(#56)
  */
-export const HARNESS_FILE_PATTERNS = [/(^|\/)vitest\.(config|workspace)\.[cm]?[jt]s$/] as const;
+export const HARNESS_FILE_PATTERNS = [
+  /(^|\/)vitest\.(config|workspace)\.[cm]?[jt]s$/,
+  /(^|\/)jest\.config\.[cm]?[jt]s$/,
+] as const;
 /** 하네스 디렉터리 안이지만 평소 작업에서 바뀌는 파일 */
 export const HARNESS_EXCLUDE = ["scripts/req-trace-baseline.txt"] as const;
 /**
@@ -71,10 +74,15 @@ export function draftAnnotation(
   return [`::warning title=harness 라벨 판정 보류(draft)::${message}`];
 }
 
-function scriptsField(text: string | null): string {
+/** package.json에서 검사·테스트 범위를 정하는 필드: scripts와 jest 설정(jest.config.* 대신 둘 수 있다, #56) */
+function checkFields(text: string | null): string {
   if (text === null) return "null";
   try {
-    return JSON.stringify((JSON.parse(text) as { scripts?: unknown }).scripts ?? null);
+    const { scripts = null, jest = null } = JSON.parse(text) as {
+      scripts?: unknown;
+      jest?: unknown;
+    };
+    return JSON.stringify({ scripts, jest });
   } catch {
     return `parse-error:${text}`;
   }
@@ -106,10 +114,10 @@ export function runHarnessChange(
   const files = changed.filter(
     (file) =>
       isHarnessPath(file) ||
-      // 검사를 부르는 scripts 필드가 바뀐 package.json (의존성만 바뀐 것은 아님)
+      // 검사를 부르는 scripts·jest 필드가 바뀐 package.json (의존성만 바뀐 것은 아님)
       (/(^|\/)package\.json$/.test(file) &&
-        scriptsField(tryGit(cwd, ["show", `${found.mergeBase}:${file}`])) !==
-          scriptsField(read(file))),
+        checkFields(tryGit(cwd, ["show", `${found.mergeBase}:${file}`])) !==
+          checkFields(read(file))),
   );
 
   if (files.length === 0) {

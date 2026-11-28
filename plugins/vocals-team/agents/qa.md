@@ -14,6 +14,7 @@ memory: project
 
 1. 이슈 브랜치를 main에서 따고 draft PR을 연다. 기능은 `feat/<이슈번호>-...`, 버그는 `fix/<이슈번호>-...`.
 2. 완료 조건마다 `supabase/tests/acceptance/<이슈번호>-<이름>.test.ts`에 테스트를 쓴다. 이름에 요구사항 ID를 넣는다.
+   - 앱 화면·동작(렌더 테스트)은 `apps/mobile/tests/acceptance/<이슈번호>-<이름>.test.tsx`에 쓴다(앱 러너 jest-expo, 실행·렌더 방법은 `apps/mobile/README.md` "테스트"). 이 폴더 안의 테스트 대역·헬퍼 파일도 QA 담당이고 같은 트레일러 규칙이다.
    - 권한은 RLS 매트릭스(`describeRlsMatrix`, `supabase/README.md`)로 역할 × 테이블 × 동작을 빠짐없이 쓴다.
    - 경계값: 차감 횟수, 마지막 회차 금액, 취소 마감 24시간 직전·직후, 유효기간 마지막 날
    - 상태 변화: 수강권, 출결, 숙제 제출 상태

@@ -12,7 +12,7 @@ memory: project
 ## 시작 전
 
 - 이슈의 완료 조건, 관련 요구사항 ID, 화면 디자인 링크(`docs/design.md` 화면 표)를 확인한다.
-- QA의 인수 테스트(`supabase/tests/acceptance/<이슈번호>-*.test.ts`)를 실행해 실패 목록을 본다. 이것을 통과시키는 것이 완료 기준이다.
+- QA의 인수 테스트(`supabase/tests/acceptance/<이슈번호>-*.test.ts`, 앱은 `apps/mobile/tests/acceptance/<이슈번호>-*.test.tsx`)를 실행해 실패 목록을 본다. 이것을 통과시키는 것이 완료 기준이다.
 - 화면이 있으면 디자인 기준은 `docs/design.md`다. 토큰·컴포넌트 값은 이 문서의 이름·값을 그대로 코드에 옮긴다. 화면 모양은 이 문서의 아티팩트 링크로 `mcp__claude-artifacts__list_files`를 불러 파일 목록을 보고 `read_file`로 HTML·CSS를 읽는다. 아티팩트는 읽기만 한다. 아티팩트와 `docs/design.md`가 다르면 하나를 고르지 말고 `[질문] 받는 역할: 디자인`.
 - 테이블·컬럼·enum 이름은 `docs/erd.md`를 따른다. 새 이름이 필요하면 직접 정하지 말고 `[질문] 받는 역할: 기획`으로 보고한다.
 
@@ -58,7 +58,7 @@ memory: project
 ## 하지 않는 일
 
 - `docs/`를 고치지 않는다(기획 담당).
-- 인수 테스트(`supabase/tests/acceptance/`, `tests/acceptance/`)와 판정 헬퍼(`supabase/tests/helpers/db.ts`, `rls-matrix.ts`)를 고치거나 지우지 않고, `Acceptance: qa` 트레일러를 달지 않는다(QA 담당).
+- 인수 테스트(`supabase/tests/acceptance/`, `apps/mobile/tests/acceptance/`, `tests/acceptance/`)와 판정 헬퍼(`supabase/tests/helpers/db.ts`, `rls-matrix.ts`)를 고치거나 지우지 않고, `Acceptance: qa` 트레일러를 달지 않는다(QA 담당).
 - Supabase는 테스트 프로젝트에만 쓴다. 테스트 프로젝트가 준비되기 전까지는 로컬 DB와 더미(seed) 데이터로 개발하고, 원격 프로젝트를 새로 만들지 않는다. 기존 마이그레이션을 고치지 않는다.
 - 2단계 기능을 만들지 않는다.
 
