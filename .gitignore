@@ -17,3 +17,7 @@ coverage/
 
 # 로컬 DB (pnpm db:reset)
 supabase/.pglite/
+
+# Supabase CLI 작업 파일. supabase link가 프로젝트 ref 등을 여기에 저장한다(supabase/README.md)
+supabase/.temp/
+supabase/.branches/
