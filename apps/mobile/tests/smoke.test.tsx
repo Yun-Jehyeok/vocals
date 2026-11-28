@@ -7,6 +7,9 @@ jest.mock("@react-native-async-storage/async-storage", () =>
   jest.requireActual("@react-native-async-storage/async-storage/jest/async-storage-mock"),
 );
 
+// 첫 렌더는 expo-router·글꼴·라우트 모듈을 처음 읽어 CI에서 기본 5초를 넘을 수 있다(#56 QA 반려). 인수 테스트와 같은 30초.
+jest.setTimeout(30_000);
+
 describe("앱 기본 틀 스모크 (#56)", () => {
   it("app/ 라우트로 첫 화면이 렌더된다(설정 값이 없으면 설정 오류 화면)", async () => {
     delete process.env.EXPO_PUBLIC_SUPABASE_URL;
