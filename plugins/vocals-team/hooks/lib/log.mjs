@@ -6,6 +6,9 @@
 // 클라우드는 세션이 끝나면 파일이 사라지므로 팀장이 그 브랜치의 작업 PR에 커밋한다(PM 결정, docs/decisions.md 2026-11-20).
 // 집계는 `pnpm harness:report`(scripts/harness-report.ts).
 //
+// 승인 요청도 같은 파일에 남긴다(이슈 #61): `hooks/log-approval.mjs`(PermissionRequest)가 `event: "approval"`,
+// `rule: "approval.wait"`, 역할, 도구 이름만 쓴다(target은 null). 차단이 아니라서 RULE_IDS에는 넣지 않는다.
+//
 // - 남기는 것: ts, session, event, rule, role, tool, target(저장소 기준 경로나 MCP 도구 이름).
 // - 남기지 않는 것: 명령 원문, 파일 내용, 도구 인자 값(시크릿·개인정보가 들어갈 수 있다).
 // - 쓰기 실패는 조용히 무시한다. 차단 판정에 영향을 주지 않는다.
@@ -39,6 +42,9 @@ export const RULE_IDS = {
   "commit.message-source": "QA가 아닌 역할의 메시지를 미리 볼 수 없는 커밋",
   "mcp.supabase": "위험한 Supabase MCP 도구",
 };
+
+/** 승인 요청 이벤트의 규칙 id(이슈 #61). 차단 규칙이 아니라 RULE_IDS 밖에 둔다 */
+export const APPROVAL_RULE = "approval.wait";
 
 const PLUGIN_MARKER = join("plugins", "vocals-team", ".claude-plugin", "plugin.json");
 export const LOG_DIR = join(".claude", "logs");
@@ -110,10 +116,10 @@ export function logFileName(dir, ts, session, branch) {
 }
 
 /**
- * 차단 이벤트 한 줄을 쓴다. 실패하면 아무것도 하지 않는다.
- * @param {{ input: any, rule: string | undefined, target?: string | null, root?: string | null }} event
+ * 이벤트 한 줄을 쓴다. 실패하면 아무것도 하지 않는다.
+ * @param {{ input: any, event: "block" | "approval", rule: string | undefined, target?: string | null, root?: string | null }} entry
  */
-export function logBlock({ input, rule, target, root }) {
+export function logEvent({ input, event, rule, target, root }) {
   try {
     const project = vocalsRoot(process.env.CLAUDE_PROJECT_DIR);
     // 막힌 곳: 대상 파일·명령의 저장소(수동 worktree나 /tmp 복사본일 수 있다). 브랜치 이름과 target 기준
@@ -127,16 +133,24 @@ export function logBlock({ input, rule, target, root }) {
     const line = {
       ts,
       session,
-      event: "block",
+      event,
       rule: rule ?? "unknown",
       role: roleOf(input?.agent_type) ?? (input?.agent_type ? String(input.agent_type) : "main"),
-      tool: String(input?.tool_name ?? ""),
+      tool: String(input?.tool_name ?? "").slice(0, 120),
       target: shownTarget(target, repo),
     };
     const dir = join(logRepo, LOG_DIR);
     mkdirSync(dir, { recursive: true });
     appendFileSync(logFileName(dir, ts, session, branch), `${JSON.stringify(line)}\n`);
   } catch {
-    // 로그는 측정용이다. 실패해도 차단은 그대로 한다
+    // 로그는 측정용이다. 실패해도 차단·승인 흐름은 그대로다
   }
+}
+
+/**
+ * 차단 이벤트 한 줄을 쓴다. 실패하면 아무것도 하지 않는다.
+ * @param {{ input: any, rule: string | undefined, target?: string | null, root?: string | null }} event
+ */
+export function logBlock({ input, rule, target, root }) {
+  logEvent({ input, event: "block", rule, target, root });
 }

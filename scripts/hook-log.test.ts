@@ -1,4 +1,4 @@
-// 훅 차단 로그 단위 테스트 (이슈 #17 하네스 6단계, #48 위치·이름)
+// 훅 차단 로그 단위 테스트 (이슈 #17 하네스 6단계, #48 위치·이름, #61 승인 요청 기록)
 // 임시 vocals 모양 저장소에서 훅을 돌리고 `.claude/logs/<날짜>-<세션>-<브랜치>.jsonl`에 남는 줄을 확인한다.
 // 명령 원문·파일 내용·도구 인자 값이 로그에 들어가지 않는지가 핵심이다.
 import { execFileSync, spawnSync } from "node:child_process";
@@ -90,7 +90,7 @@ function runHook(script: string, input: Record<string, unknown>, env: Record<str
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PROJECT_DIR: repo, ...env },
   });
-  return { status: result.status, stderr: result.stderr };
+  return { status: result.status, stderr: result.stderr, stdout: result.stdout };
 }
 
 interface LogLine {
@@ -319,5 +319,101 @@ describe("훅 차단 로그 (이슈 #17 6단계)", () => {
       for (const match of source.matchAll(/\brule:\s*"([^"]+)"/g)) used.add(match[1] ?? "");
     }
     expect([...used].sort()).toEqual(Object.keys(RULE_IDS).sort());
+  });
+});
+
+describe("승인 요청 기록 (이슈 #61)", () => {
+  const request = (extra: Record<string, unknown> = {}) => ({
+    hook_event_name: "PermissionRequest",
+    permission_mode: "default",
+    tool_name: "Bash",
+    tool_input: { command: "curl -H 'Authorization: TOPSECRET-77' x", description: "010-1234" },
+    permission_suggestions: [
+      { type: "addRules", rules: [{ toolName: "Bash", ruleContent: "curl TOPSECRET-77" }] },
+    ],
+    ...extra,
+  });
+
+  it("approval.wait·역할·도구 이름만 남기고 명령 원문·인자·제안은 남기지 않는다", () => {
+    const result = runHook("log-approval.mjs", request({ agent_type: "vocals-team:developer" }));
+    expect(result.status).toBe(0);
+    expect(logLines(repo)).toEqual([
+      {
+        ts: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        session: "abcd1234",
+        event: "approval",
+        rule: "approval.wait",
+        role: "developer",
+        tool: "Bash",
+        target: null,
+      },
+    ]);
+    expect(logFiles(repo)[0]).toMatch(/-abcd1234-work\.jsonl$/);
+    for (const secret of ["TOPSECRET", "curl", "010-1234", "addRules"]) {
+      expect(rawLog(repo)).not.toContain(secret);
+    }
+  });
+
+  it("결정을 내지 않는다(stdout 없음, 종료 코드 0) — 승인 흐름은 그대로", () => {
+    const result = runHook("log-approval.mjs", request());
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+    expect(logLines(repo)).toMatchObject([{ role: "main", tool: "Bash" }]);
+  });
+
+  it("MCP 도구는 도구 이름만 남긴다(mcp_server·인자 없음)", () => {
+    runHook(
+      "log-approval.mjs",
+      request({
+        tool_name: "mcp__claude-artifacts__publish_version",
+        tool_input: { content: "<html>PRIVATE</html>" },
+        mcp_server: { name: "claude-artifacts" },
+        agent_type: "qa",
+      }),
+    );
+    expect(logLines(repo)).toMatchObject([
+      { role: "qa", tool: "mcp__claude-artifacts__publish_version", target: null },
+    ]);
+    expect(rawLog(repo)).not.toContain("PRIVATE");
+  });
+
+  it("worktree에서 물어도 메인 체크아웃에 worktree 브랜치 이름으로 쓴다", () => {
+    runHook("log-approval.mjs", request({ cwd: worktree }));
+    expect(logFiles(repo)[0]).toMatch(/-abcd1234-main\.jsonl$/);
+    expect(logFiles(worktree)).toEqual([]);
+  });
+
+  it("입력이 깨졌거나 vocals 저장소가 아니면 남기지 않고 종료 코드 0", () => {
+    const broken = spawnSync(process.execPath, [join(HOOKS, "log-approval.mjs")], {
+      input: "{not json",
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+    });
+    expect(broken.status).toBe(0);
+    expect(broken.stdout).toBe("");
+    const away = runHook("log-approval.mjs", request({ cwd: outside }), {
+      CLAUDE_PROJECT_DIR: outside,
+    });
+    expect(away.status).toBe(0);
+    expect(logFiles(repo)).toEqual([]);
+    expect(existsSync(join(outside, ".claude"))).toBe(false);
+  });
+
+  it("hooks.json의 PermissionRequest가 이 스크립트를 모든 도구에 부른다", () => {
+    const config = JSON.parse(readFileSync(join(HOOKS, "hooks.json"), "utf8"));
+    const entries = config.hooks.PermissionRequest as {
+      matcher?: string;
+      hooks: { command: string }[];
+    }[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.matcher ?? "").toBe("");
+    expect(entries[0]?.hooks[0]?.command).toBe(
+      'node "${CLAUDE_PLUGIN_ROOT}/hooks/log-approval.mjs"',
+    );
+    // 차단 규칙이 아니라 RULE_IDS(한 번도 안 걸린 규칙 집계)에 넣지 않는다
+    expect(readFileSync(join(HOOKS, "lib", "log.mjs"), "utf8")).toContain(
+      'APPROVAL_RULE = "approval.wait"',
+    );
   });
 });
