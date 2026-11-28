@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "vocals",
+    "slug": "vocals",
+    "scheme": "vocals",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": ["expo-router"]
+  }
+}

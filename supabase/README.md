@@ -153,7 +153,8 @@ pnpm test                             # 전체 (CI와 같다)
   `pnpm check:acceptance-guard`(CI 포함)가 이 트레일러 없이 바뀐 인수 테스트를 막는다.
 - 판정에 영향을 주는 헬퍼(`tests/helpers/db.ts`, `tests/helpers/rls-matrix.ts`, `tests/rls-matrix.test.ts`)도 같은 규칙으로 보호한다. `seed.sql`, `seed-ids.ts`, shim은 개발이 고친다.
 - 개발·디자인은 인수 테스트를 고치지 않는다. 틀렸다고 보면 `[질문] 받는 역할: QA`로 보고한다.
-- E2E(실제 앱 + 로컬 Supabase + seed) 인수 테스트는 앱이 생기면 루트의 `tests/acceptance/`에 둔다. 지금은 없다. 이 경로도 같은 규칙으로 보호한다.
+- 앱 화면·동작 인수 테스트(렌더 테스트)는 `apps/mobile/tests/acceptance/<이슈번호>-<이름>.test.tsx`에 둔다(`apps/mobile/README.md` "테스트"). 이 폴더 전체를 같은 규칙으로 보호한다.
+- E2E(실제 앱 + 로컬 Supabase + seed) 인수 테스트는 루트의 `tests/acceptance/`에 둔다. 지금은 없다. 이 경로도 같은 규칙으로 보호한다.
 
 ## RLS 권한 매트릭스
 

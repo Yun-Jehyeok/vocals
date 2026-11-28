@@ -24,7 +24,7 @@
 ## 구조와 명령
 
 ```
-apps/mobile/       Expo 앱 (학생·트레이너·운영자) — 아직 없음
+apps/mobile/       Expo 앱 (학생·트레이너·운영자). 실행 방법은 apps/mobile/README.md
 apps/admin/        Next.js 운영자 웹 — 아직 없음
 packages/shared/   도메인 타입·규칙 (앱·웹·서버 함수가 함께 씀)
 supabase/          migrations/, tests/, seed.sql. 테스트 프로젝트에 올리는 방법은 supabase/README.md (functions/ — 아직 없음)

@@ -87,6 +87,27 @@ describe("acceptance-guard (이슈 #17)", () => {
     expect(guard().status).toBe("fail");
   });
 
+  it("앱 인수 테스트(apps/mobile/tests/acceptance/)와 그 폴더의 헬퍼도 보호한다 (#56 결정 7)", () => {
+    commit("test: 앱 인수 테스트", { "apps/mobile/tests/acceptance/56-login.test.tsx": "x" });
+    expect(guard().status).toBe("fail");
+    expect(guard().violations.map((v) => v.file)).toEqual([
+      "apps/mobile/tests/acceptance/56-login.test.tsx",
+    ]);
+  });
+
+  it("앱 인수 테스트는 QA 트레일러가 있으면 통과하고, 앱의 다른 테스트는 보호하지 않는다 (#56)", () => {
+    commit(`test: 56번 앱 인수 테스트${QA}`, {
+      "apps/mobile/tests/acceptance/56-login.test.tsx": "x",
+      "apps/mobile/tests/acceptance/doubles.ts": "x",
+    });
+    commit("test: 스모크", { "apps/mobile/tests/smoke.test.tsx": "x" });
+    expect(guard().status).toBe("pass");
+    commit("fix: 대역 고침", { "apps/mobile/tests/acceptance/doubles.ts": "y" });
+    expect(guard().violations.map((v) => v.file)).toEqual([
+      "apps/mobile/tests/acceptance/doubles.ts",
+    ]);
+  });
+
   it("인수 테스트를 트레일러 없이 지워도 실패한다", () => {
     commit("chore: 정리", { [ACCEPTANCE_FILE]: null });
     expect(guard().status).toBe("fail");

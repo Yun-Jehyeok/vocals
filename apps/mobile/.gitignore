@@ -1,0 +1,6 @@
+# Expo CLI가 만드는 파일
+.expo/
+expo-env.d.ts
+# 네이티브 폴더는 만들지 않는다(Expo Go 기준, 개발용 빌드는 다른 이슈)
+/ios
+/android

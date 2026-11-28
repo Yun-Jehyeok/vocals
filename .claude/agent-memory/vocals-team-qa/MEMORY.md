@@ -32,6 +32,13 @@
 - 허용 목록 훅을 판정할 때는 목록 안 명령의 위험한 하위 명령(gh alias·download·clone), 인자를 그대로 돌려주는 함수(str.strip·split·encode), 도구가 읽는 환경 변수(vitest UPDATE_SNAPSHOT)를 먼저 우회 시도한다(#48 3차).
 - 글 자리(SINK) 허용 목록을 판정할 때는 함수 이름마다 "스트림·대상 없이 부르면 인자를 돌려주는가"를 확인한다(yaml.dump는 글을 돌려주고 json.dump는 None). 마지막 판정에서는 main에서도 허용되던 구멍(gh api PUT contents 등)을 반려 사유와 분리해 참고로만 적는다(#48 4차).
 - 훅 PR 최종 판정은 마지막 수정 diff가 말한 범위(줄 수)와 같은지 `git show --stat`으로 먼저 확인하고, 우회 탐색은 그 diff 범위만 한다(#48 최종).
+- 앱 인수 테스트의 앱 재시작: `jest.resetModules()` 뒤 react·react-native·expo-router(하위 경로 포함)·safe-area·screens·expo-linking·expo-constants·expo-modules-core를 `jest.doMock(name, () => 이전 인스턴스)`로 고정하고 정적으로 가져온 `renderRouter`로 다시 렌더한다. 테스트 안에서 testing-library를 다시 require하면 "Hooks cannot be defined inside tests"가 난다(#56).
+- RNTL 14 `fireEvent.press`는 핸들러가 돌려준 Promise까지 기다린다. 대역이 붙잡아 둔 로딩 상태는 `void press` → 마이크로태스크 20번 → `act`로 흘려보낸다. 열린 `act` 안에서 `setTimeout`을 기다리면 멈춘다(#56).
+- jest-expo에서 `AppState.addEventListener`는 이미 jest.fn이다. spyOn한 뒤 원래 함수를 부르면 무한 재귀가 된다(#56).
+- QA 훅은 `*.test.*`만 허용했다(0.7.0 이전). 테스트 헬퍼·대역은 테스트 파일 안에 두고, jest.mock 팩토리가 부르는 함수 이름은 `mock`으로 시작, 대역 상태는 globalThis에 둔다(#56).
 - 역할·기본 권한 검증은 `/usr/lib/postgresql/16/bin`에 임시 클러스터를 만들어 한다. root로는 initdb·pg_ctl이 안 되니 `runuser -u postgres`로 돌린다. superuser는 `supabase_admin`, `postgres`는 superuser가 아니게 만들고, 기본 권한은 `alter default privileges for role postgres`로 건다(#59).
 - 기본 권한을 바꾸는 변경은 /tmp 복사본에서 shim의 기본 권한 줄을 빼고 인수 테스트 전체를 돌린다. 대조군(그 마이그레이션 제외)이 실패하는지도 함께 본다(#59).
 - 설정 파일의 "안전장치" 주석은 외부 도구 문서로 확인한다. 예: Supabase CLI v3에서 `--include-seed`가 `[db.seed] enabled = false`를 무시한다(#59).
+- 앱 인수 테스트에서 재시작을 흉내 내며 라이브러리를 고정할 때, jest-expo 프리셋이 doMock으로 대역을 넣은 모듈(`expo-modules-core`)은 `jest.requireActual`이 아니라 `jest.requireMock`으로 고정한다(#56).
+- 앱 판정 때는 로컬 `pnpm check`만 보지 말고 CI `check` 로그도 본다. CI가 느려 jest 기본 5s 한도를 넘는 렌더 테스트가 있다(#56).
+- 재판정할 때 확인할 것은 세 가지다: 개발 수정 커밋이 말한 범위뿐인지(`git show --stat`), main merge 뒤 `apps/mobile`과 인수 테스트가 바뀌었는지(`git diff --stat <지난 판정 head> HEAD -- apps/mobile`), head sha의 CI check 로그 요약 수. 이 셋이 맞고 바뀐 앱 코드가 없으면 앞 판정의 통과 근거를 그대로 쓴다(#56).

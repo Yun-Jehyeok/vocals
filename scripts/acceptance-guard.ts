@@ -12,12 +12,14 @@ import { fileURLToPath } from "node:url";
 
 /**
  * QA만 바꾸는 경로.
- * - 인수 테스트: DB 인수 테스트와, 앱이 생기면 쓸 E2E 자리
+ * - 인수 테스트: DB 인수 테스트, 앱 인수 테스트(앱 러너에서 도는 렌더 테스트, 팀장 결정 2026-11-23 #56),
+ *   E2E 자리. 앱 인수 테스트 폴더 안의 테스트 대역·헬퍼 파일도 QA 담당이다.
  * - 판정에 영향을 주는 헬퍼: 누구로 실행하는지(db.ts), 허용/차단 판정(rls-matrix.ts)과 그 자체 테스트.
  *   seed·seed-ids·shim은 개발이 새 테이블마다 고쳐야 해서 넣지 않는다.
  */
 export const PROTECTED_PATHS = [
   "supabase/tests/acceptance/",
+  "apps/mobile/tests/acceptance/",
   "tests/acceptance/",
   "supabase/tests/helpers/db.ts",
   "supabase/tests/helpers/rls-matrix.ts",
